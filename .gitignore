@@ -35,3 +35,8 @@ build/
 
 # Secrets
 .env
+
+# Local analysis / reference folders (do not commit large assets)
+분석용/
+하계학회논문레퍼런스/
+.claude/
