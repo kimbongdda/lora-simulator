@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>System Model — Collision-Focused Slotted LoRaWAN Simulator</title>
+  <script>
+    MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']], tags: 'ams' },
+      options: { skipHtmlTags: ['script','noscript','style','textarea','pre'] }
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js" async></script>
+  <style>
+    :root {
+      --accent: #2563eb;
+      --accent-light: #eff6ff;
+      --border: #e2e8f0;
+      --text: #1e293b;
+      --muted: #64748b;
+      --bg: #ffffff;
+      --code-bg: #f8fafc;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      font-size: 15px;
+      line-height: 1.75;
+      color: var(--text);
+      background: var(--bg);
+    }
+    /* Layout */
+    .page-wrapper { display: flex; min-height: 100vh; }
+    nav {
+      width: 260px;
+      min-width: 260px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      background: #f1f5f9;
+      border-right: 1px solid var(--border);
+      padding: 24px 16px;
+    }
+    nav h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 12px; }
+    nav ol { list-style: none; padding: 0; }
+    nav li { margin: 2px 0; }
+    nav a {
+      display: block;
+      padding: 5px 10px;
+      border-radius: 6px;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 13px;
+      transition: background 0.15s, color 0.15s;
+    }
+    nav a:hover { background: var(--accent-light); color: var(--accent); }
+    main {
+      flex: 1;
+      max-width: 860px;
+      padding: 48px 56px;
+    }
+    /* Typography */
+    h1 { font-size: 26px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+    .subtitle { font-size: 13px; color: var(--muted); margin-bottom: 40px; }
+    h2 {
+      font-size: 20px; font-weight: 700;
+      margin: 48px 0 16px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid var(--accent);
+      color: var(--text);
+    }
+    h3 { font-size: 16px; font-weight: 600; margin: 28px 0 10px; color: var(--text); }
+    h4 { font-size: 14px; font-weight: 600; margin: 20px 0 8px; color: var(--text); }
+    p { margin: 10px 0; }
+    ul, ol { margin: 10px 0 10px 24px; }
+    li { margin: 4px 0; }
+    hr { border: none; border-top: 1px solid var(--border); margin: 36px 0; }
+    /* Math display */
+    .math-block {
+      overflow-x: auto;
+      margin: 16px 0;
+      padding: 14px 20px;
+      background: var(--code-bg);
+      border-left: 3px solid var(--accent);
+      border-radius: 0 6px 6px 0;
+    }
+    /* Tables */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+      font-size: 14px;
+    }
+    th {
+      background: #f1f5f9;
+      font-weight: 600;
+      text-align: left;
+      padding: 9px 14px;
+      border: 1px solid var(--border);
+    }
+    td {
+      padding: 8px 14px;
+      border: 1px solid var(--border);
+      vertical-align: top;
+    }
+    tr:nth-child(even) td { background: #fafafa; }
+    code {
+      font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+      font-size: 13px;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 5px;
+    }
+    /* Blockquote */
+    blockquote {
+      margin: 16px 0;
+      padding: 12px 18px;
+      background: #fff7ed;
+      border-left: 4px solid #f59e0b;
+      border-radius: 0 6px 6px 0;
+      font-size: 14px;
+      color: #78350f;
+    }
+    blockquote strong { color: #92400e; }
+    /* Badges */
+    .badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 99px;
+      margin-left: 8px;
+      vertical-align: middle;
+    }
+    .badge-blue  { background: #dbeafe; color: #1d4ed8; }
+    .badge-green { background: #dcfce7; color: #15803d; }
+    .badge-amber { background: #fef3c7; color: #b45309; }
+  </style>
+</head>
+<body>
+<div class="page-wrapper">
+
+<!-- Sidebar -->
+<nav>
+  <h2>목차</h2>
+  <ol>
+    <li><a href="#s0">0. 노테이션 요약</a></li>
+    <li><a href="#s1">1. 네트워크 구성</a></li>
+    <li><a href="#s2">2. 무선 채널 모델</a></li>
+    <li><a href="#s3">3. 노드 배치 모델</a></li>
+    <li><a href="#s4">4. 트래픽 모델</a></li>
+    <li><a href="#s5">5. 리소스 구조 및 제공 부하</a></li>
+    <li><a href="#s6">6. 전송 결정 모델</a></li>
+    <li><a href="#s7">7. 충돌 및 링크 실패 모델</a></li>
+    <li><a href="#s8">8. 게이트웨이 피드백 모델</a></li>
+    <li><a href="#s9">9. 성능 지표</a></li>
+    <li><a href="#s10">10. MAC 전략 모델</a> <small style="color:#94a3b8">EXP3·Thompson·Dual-MAB 포함</small></li>
+    <li><a href="#s11">11. Q-learning 컨트롤러</a></li>
+    <li><a href="#s12">12. 시뮬레이션 구현 및 최적화</a></li>
+    <li><a href="#s13">13. 모델 단순화 가정 및 한계</a></li>
+    <li><a href="#s14">14. 시뮬레이션 파라미터 요약</a></li>
+  </ol>
+</nav>
+
+<main>
+  <h1>System Model</h1>
+  <div class="subtitle">Collision-Focused Slotted LoRaWAN Simulator &nbsp;&middot;&nbsp; 최종 수정: 2026-04-26</div>
+
+  <!-- ===== Section 0 ===== -->
+  <h2 id="s0">0. 노테이션 요약</h2>
+
+  <h3>0.1 기본 인덱스 (전체 문서 고정)</h3>
+  <table>
+    <tr><th>기호</th><th>의미</th><th>범위</th></tr>
+    <tr><td>$i$</td><td>노드(ED) 인덱스</td><td>$\{1, \ldots, N\}$</td></tr>
+    <tr><td>$t$</td><td>시간 슬롯 인덱스</td><td>$\{0, 1, \ldots, T_{\rm total}-1\}$</td></tr>
+    <tr><td>$k$</td><td>SF 인덱스</td><td>$\{0,\ldots,5\}$ (SF7=0, SF12=5)</td></tr>
+    <tr><td>$c$</td><td>채널 인덱스</td><td>$\{0,\ldots,N_{\rm ch}-1\}$</td></tr>
+    <tr><td>$g$</td><td>게이트웨이 인덱스</td><td>현재 단일 GW → $g = 0$ 고정</td></tr>
+  </table>
+
+  <h3>0.2 집합 및 스칼라 상수</h3>
+  <table>
+    <tr><th>기호</th><th>정의</th><th>값/단위</th></tr>
+    <tr><td>$N$</td><td>단말 노드 수</td><td>양의 정수</td></tr>
+    <tr><td>$N_{\rm SF}$</td><td>SF 종류 수</td><td>6</td></tr>
+    <tr><td>$N_{\rm ch}$</td><td>직교 채널 수</td><td>설정값 (기본 3)</td></tr>
+    <tr><td>$N_{\rm res}$</td><td>총 직교 자원 수</td><td>$N_{\rm SF} \times N_{\rm ch}$</td></tr>
+    <tr><td>$T_{\rm warm}$</td><td>워밍업 슬롯 수</td><td>—</td></tr>
+    <tr><td>$T_{\rm total}$</td><td>전체 슬롯 수</td><td>—</td></tr>
+    <tr><td>$T_{\rm meas}$</td><td>측정 슬롯 수</td><td>$T_{\rm total} - T_{\rm warm}$</td></tr>
+    <tr><td>$T_{\rm epoch}$</td><td>에폭 길이</td><td>슬롯 수</td></tr>
+  </table>
+
+  <h3>0.3 채널 및 링크</h3>
+  <table>
+    <tr><th>기호</th><th>정의</th><th>단위</th></tr>
+    <tr><td>$d_i$</td><td>노드 $i$와 GW 간 거리</td><td>m</td></tr>
+    <tr><td>$d_0$</td><td>경로손실 기준 거리</td><td>m</td></tr>
+    <tr><td>$\eta$</td><td>경로손실 지수</td><td>무차원</td></tr>
+    <tr><td>$\mathrm{LPL}(d)$</td><td>거리 $d$에서의 경로손실</td><td>dB</td></tr>
+    <tr><td>$P_{\rm tx}$</td><td>송신 전력</td><td>dBm</td></tr>
+    <tr><td>$G_L$</td><td>안테나 이득/손실 합산</td><td>dB</td></tr>
+    <tr><td>$N_{\rm floor}$</td><td>잡음 바닥</td><td>dBm</td></tr>
+    <tr><td>$P_{\rm rx}(d)$</td><td>거리 $d$에서의 수신 전력</td><td>dBm</td></tr>
+    <tr><td>$\mathrm{SNR}(d)$</td><td>거리 $d$에서의 평균 SNR</td><td>dB</td></tr>
+    <tr><td>$\mathrm{SNR}_{\rm inst}$</td><td>순시 SNR (Rayleigh 포락선 적용 후)</td><td>dB</td></tr>
+    <tr><td>$\gamma_{\rm rf}$</td><td>Rayleigh 페이딩 전력 이득 ($\sim \mathrm{Exp}(1)$)</td><td>무차원</td></tr>
+    <tr><td>$\Delta_{\rm fade}$</td><td>페이드 마진</td><td>dB</td></tr>
+    <tr><td>$k_i(t)$</td><td>슬롯 $t$에서 노드 $i$가 선택한 SF 인덱스</td><td>$\{0,\ldots,5\}$</td></tr>
+    <tr><td>$\theta_k$</td><td>SF 인덱스 $k$의 수신 감도 임계값</td><td>dB</td></tr>
+    <tr><td>$\mathrm{margin}_i(t)$</td><td>노드 $i$의 슬롯 $t$ SNR 여유분</td><td>dB</td></tr>
+    <tr><td>$R_{\rm cell}$</td><td>SF12 ($k=5$) 기준 셀 반경</td><td>m</td></tr>
+    <tr><td>$\delta_{\rm edge}$</td><td>셀 가장자리 마진</td><td>dB</td></tr>
+  </table>
+
+  <h3>0.4 트래픽 및 큐</h3>
+  <table>
+    <tr><th>기호</th><th>정의</th></tr>
+    <tr><td>$G$</td><td>목표 제공 부하, 직교 자원 단위로 정규화</td></tr>
+    <tr><td>$p_{\rm arr}$</td><td>슬롯당 노드별 패킷 도착 확률</td></tr>
+    <tr><td>$\Lambda_i(t)$</td><td>슬롯 $t$에서 노드 $i$의 패킷 도착 지시자 ($\in \{0,1\}$)</td></tr>
+    <tr><td>$q_i(t)$</td><td>슬롯 $t$ 시작 시 노드 $i$의 큐 길이 (패킷 수)</td></tr>
+    <tr><td>$m_i(t)$</td><td>슬롯 $t$에서 노드 $i$의 현재 연속 실패 횟수 (성공 시에만 리셋, 큐 모드 무관)</td></tr>
+    <tr><td>$b_i(t)$</td><td>슬롯 $t$에서 노드 $i$의 잔여 백오프 카운터</td></tr>
+    <tr><td>$c_i(t)$</td><td>슬롯 $t$에서 노드 $i$가 선택한 채널 인덱스</td></tr>
+  </table>
+
+  <h3>0.5 성능 지표</h3>
+  <table>
+    <tr><th>기호</th><th>정의</th></tr>
+    <tr><td>$S_i$</td><td>노드 $i$의 측정 구간 총 성공 횟수</td></tr>
+    <tr><td>$A_i$</td><td>노드 $i$의 측정 구간 총 전송 시도 횟수</td></tr>
+    <tr><td>$C_i$</td><td>노드 $i$의 측정 구간 총 충돌 횟수</td></tr>
+    <tr><td>$A_{\rm total}$</td><td>측정 구간 총 전송 시도 횟수 ($= \sum_i A_i$)</td></tr>
+    <tr><td>$\mathrm{ASR}$</td><td>패킷 성공률</td></tr>
+    <tr><td>$G_{\rm att}$</td><td>실현 제공 부하</td></tr>
+    <tr><td>$\bar{Q}$</td><td>측정 구간 평균 노드별 백로그</td></tr>
+    <tr><td>$\mathcal{F}$</td><td>Jain's Fairness Index</td></tr>
+  </table>
+
+  <h3>0.6 게이트웨이 피드백</h3>
+  <table>
+    <tr><th>기호</th><th>정의</th></tr>
+    <tr><td>$n_c(\tau)$</td><td>슬롯 $\tau$의 채널 $c$ 기여 카운트 (모드에 따라 정의)</td></tr>
+    <tr><td>$\hat{G}_c(t)$</td><td>슬롯 $t$에서 채널 $c$의 추정 제공 부하</td></tr>
+    <tr><td>$W_{\rm gw}$</td><td>GW 부하 추정 롤링 윈도우 길이 (슬롯)</td></tr>
+    <tr><td>$\mathrm{bin}(\hat{G}_c)$</td><td>추정 부하 양자화 값 ($\in \{0,1,2\}$)</td></tr>
+    <tr><td>$\hat{g}_{\rm max}(t)$</td><td>슬롯 $t$에서 채널 전체의 최대 양자화 bin</td></tr>
+  </table>
+
+  <h3>0.7 Q-learning</h3>
+  <table>
+    <tr><th>기호</th><th>정의</th></tr>
+    <tr><td>$\mathcal{S}$</td><td>상태 공간</td></tr>
+    <tr><td>$\mathcal{A}$</td><td>액션 공간</td></tr>
+    <tr><td>$x_t$</td><td>슬롯 $t$에서의 Q-learning 상태 인덱스 ($\in \mathcal{S}$)</td></tr>
+    <tr><td>$a_t$</td><td>슬롯 $t$에서 선택한 액션 ($\in \mathcal{A}$)</td></tr>
+    <tr><td>$Q_i(x, a)$</td><td>노드 $i$의 Q-테이블 값</td></tr>
+    <tr><td>$r_t$</td><td>슬롯 $t$에서의 보상</td></tr>
+    <tr><td>$\alpha$</td><td>Q-learning 학습률</td></tr>
+    <tr><td>$\gamma$</td><td>Q-learning 할인율</td></tr>
+    <tr><td>$\epsilon_i(t)$</td><td>슬롯 $t$에서 노드 $i$의 탐색률</td></tr>
+    <tr><td>$f_{\rm level}$</td><td>상태 벡터의 실패 레벨 차원 (연속 실패 횟수 $m_i$의 이산화)</td></tr>
+    <tr><td>$\hat{g}_{\rm max}$</td><td>상태 벡터의 최대 혼잡도 bin 차원</td></tr>
+    <tr><td>$n_i^{\rm ep}(t)$</td><td>현재 에폭 내 노드 $i$의 누적 성공 횟수 (에폭 경계마다 초기화)</td></tr>
+    <tr><td>$\bar{n}^{\rm ep}(t)$</td><td>현재 에폭 내 전체 노드 평균 성공 횟수</td></tr>
+    <tr><td>$\nu_i(t)$</td><td>에폭 내 성공 횟수 정규화값 ($= n_i^{\rm ep} / \max(1, \bar{n}^{\rm ep})$)</td></tr>
+  </table>
+
+  <hr>
+
+  <!-- ===== Section 1 ===== -->
+  <h2 id="s1">1. 네트워크 구성</h2>
+  <p>본 시뮬레이터는 단일 게이트웨이($g=0$)와 $N$개의 단말 노드(End Device, ED)로 구성된 단일-셀 LoRaWAN 업링크 시나리오를 모델링한다.</p>
+  <ul>
+    <li>게이트웨이는 원점 $(0, 0)$에 고정 배치된다.</li>
+    <li>각 노드 $i \in \{1, \ldots, N\}$는 시뮬레이션 시작 시 배치되며, 이후 위치는 변하지 않는다(정적 노드).</li>
+    <li>모든 노드는 LoRa 변조를 사용하며, SF 인덱스 $k \in \{0,\ldots,5\}$ (SF7=0, SF12=5) 중 하나와 채널 $c \in \{0,\ldots,N_{\rm ch}-1\}$ 중 하나를 선택하여 업링크 전송을 수행한다.</li>
+    <li>다운링크 및 ACK는 없으며, 전송 성공 여부는 시뮬레이터 내부에서 결정론적으로 판정된다.</li>
+  </ul>
+  <hr>
+
+  <!-- ===== Section 2 ===== -->
+  <h2 id="s2">2. 무선 채널 모델</h2>
+
+  <h3>2.1 경로손실 모델</h3>
+  <p>로그-거리 경로손실 모델(Log-distance Path Loss Model)을 사용한다:</p>
+  <div class="math-block">$$\mathrm{LPL}(d) = \mathrm{LPL}(d_0) + 10\,\eta \log_{10}\!\left(\frac{d}{d_0}\right) \quad [\mathrm{dB}]$$</div>
+  <p>여기서 $d$는 노드와 게이트웨이 사이의 거리(m), $d_0$는 기준 거리(m), $\eta$는 경로손실 지수이다.</p>
+  <p>수신 전력(RSSI) 및 신호 대 잡음비(SNR)는 다음과 같이 계산한다:</p>
+  <div class="math-block">$$P_{\rm rx}(d) = P_{\rm tx} - G_L - \mathrm{LPL}(d) \quad [\mathrm{dBm}]$$</div>
+  <div class="math-block">$$\mathrm{SNR}(d) = P_{\rm rx}(d) - N_{\rm floor} \quad [\mathrm{dB}]$$</div>
+  <table>
+    <tr><th>파라미터</th><th>기호</th><th>값</th></tr>
+    <tr><td>송신 전력</td><td>$P_{\rm tx}$</td><td>14.0 dBm</td></tr>
+    <tr><td>안테나 이득/손실</td><td>$G_L$</td><td>0.0 dB</td></tr>
+    <tr><td>잡음 바닥</td><td>$N_{\rm floor}$</td><td>−119.0 dBm</td></tr>
+  </table>
+  <blockquote><strong>비고:</strong> 기본적으로 섀도잉 및 소규모 페이딩을 포함하지 않는다. 동일 거리의 노드들은 동일한 결정론적 SNR을 가진다. 소규모 페이딩은 <a href="#s25">섹션 2.5</a>에서 선택적으로 활성화할 수 있다.</blockquote>
+
+  <h3>2.2 라디오 프로파일</h3>
+  <p>경로손실 파라미터는 아래 프로파일 중 하나로 지정된다:</p>
+  <table>
+    <tr><th>프로파일</th><th>$d_0$ (m)</th><th>$\mathrm{LPL}(d_0)$ (dB)</th><th>$\eta$</th><th>비고</th></tr>
+    <tr><td><code>short</code></td><td>1</td><td>40.0</td><td>3.5</td><td>임의 (도심 단거리)</td></tr>
+    <tr><td><code>medium</code></td><td>1</td><td>37.0</td><td>3.0</td><td>임의 (교외 중거리)</td></tr>
+    <tr><td><code>long</code></td><td>1</td><td>34.0</td><td>2.5</td><td>임의 (농촌 장거리)</td></tr>
+    <tr><td><code>lorasim</code></td><td>40</td><td>127.41</td><td>2.08</td><td>LoRaSim 논문 기반 실측값</td></tr>
+  </table>
+
+  <h3>2.3 SF별 수신 감도 임계값</h3>
+  <p>LoRa 복조기의 SF별 최소 SNR 임계값은 다음과 같이 정의된다:</p>
+  <table>
+    <tr><th>SF</th><th>인덱스 $k$</th><th>$\theta_k$ (dB)</th></tr>
+    <tr><td>SF7</td><td>0</td><td>−7.5</td></tr>
+    <tr><td>SF8</td><td>1</td><td>−10.0</td></tr>
+    <tr><td>SF9</td><td>2</td><td>−12.5</td></tr>
+    <tr><td>SF10</td><td>3</td><td>−15.0</td></tr>
+    <tr><td>SF11</td><td>4</td><td>−17.5</td></tr>
+    <tr><td>SF12</td><td>5</td><td>−20.0</td></tr>
+  </table>
+
+  <h3>2.4 셀 반경</h3>
+  <p>SF 인덱스 $k \in \{0,\ldots,5\}$를 사용할 때, 셀 가장자리 마진 $\delta_{\rm edge}$ (기본값 2.0 dB)를 포함한 최대 커버리지 반경은 다음과 같이 계산된다:</p>
+  <div class="math-block">$$R_{\rm cell}(k) = d_0 \cdot 10^{\,\dfrac{L_{\rm max}(k) - \mathrm{LPL}(d_0)}{10\,\eta}}$$</div>
+  <div class="math-block">$$L_{\rm max}(k) = P_{\rm tx} - G_L - \bigl(N_{\rm floor} + \theta_k + \delta_{\rm edge}\bigr)$$</div>
+  <p>이하 단순 $R_{\rm cell}$로 표기할 때는 $k = 5$ (SF12) 기준값을 의미한다:</p>
+  <div class="math-block">$$R_{\rm cell} \;:=\; R_{\rm cell}(5)$$</div>
+
+  <h3 id="s25">2.5 Rayleigh 페이딩 모델 (선택적)</h3>
+  <p><code>enable_rayleigh_fading = True</code>로 활성화하면, 단독 전송 판정 시 결정론적 평균 SNR에 Rayleigh 페이딩 포락선(envelope)을 적용한다.</p>
+  <p>Rayleigh 채널의 전력 이득 $\gamma_{\rm rf} \sim \mathrm{Exp}(1)$ (평균 1 지수분포, 슬롯마다 독립 샘플링):</p>
+  <div class="math-block">$$\mathrm{SNR}_{\rm inst}(d_i) = \mathrm{SNR}(d_i) + \Delta_{\rm fade} + 10\log_{10}(\gamma_{\rm rf})$$</div>
+  <p>여기서 $\Delta_{\rm fade}$ = <code>rayleigh_fade_margin_db</code> (기본값 10.0 dB)는 평균 SNR에 더해지는 운용 마진 오프셋이다. 링크 성공 조건은 순시 SNR 기준으로 평가된다:</p>
+  <div class="math-block">$$\text{결과}_i(t) = \begin{cases} \text{SUCCESS}    &amp; \mathrm{SNR}_{\rm inst}(d_i) \geq \theta_{k_i(t)} \\ \text{FAIL\_LINK} &amp; \mathrm{SNR}_{\rm inst}(d_i) < \theta_{k_i(t)} \end{cases}$$</div>
+  <p><strong>페이드 마진에 따른 아웃레이지 확률 근사</strong> (평균 SNR 마진이 충분히 클 때):</p>
+  <div class="math-block">$$P_{\rm out} \approx 1 - \exp\!\left(-10^{-\Delta_{\rm fade}/10}\right)$$</div>
+  <table>
+    <tr><th>$\Delta_{\rm fade}$ (dB)</th><th>$P_{\rm out}$ (근사)</th></tr>
+    <tr><td>0 dB</td><td>63.2%</td></tr>
+    <tr><td>3 dB</td><td>39.3%</td></tr>
+    <tr><td>5 dB</td><td>26.4%</td></tr>
+    <tr><td>10 dB</td><td>9.5%</td></tr>
+    <tr><td>20 dB</td><td>1.0%</td></tr>
+  </table>
+  <blockquote><strong>구현:</strong> 배치 경로(<code>DecentralizedQLearningController</code>)에서는 <code>np.random.exponential(1.0, size=N_solo)</code>로 벡터 샘플링, 표준 경로에서는 <code>rng.expovariate(1.0)</code>으로 스칼라 샘플링한다. 두 경로 모두 <code>rayleigh_fade_margin_db</code>를 동일하게 적용한다. 기본값은 비활성화(결정론적 모델)이며, 대시보드 슬라이더로 0–30 dB 범위에서 조정 가능하다.</blockquote>
+  <hr>
+
+  <!-- ===== Section 3 ===== -->
+  <h2 id="s3">3. 노드 배치 모델</h2>
+
+  <h3>3.1 배치 시드 분리</h3>
+  <p>복수의 베이스라인을 동일한 조건에서 비교하기 위해, 노드 배치에 사용하는 난수 시드(<code>layout_seed</code>)와 시뮬레이션 동작에 사용하는 시드(<code>seed</code>)를 분리한다.</p>
+  <div class="math-block">$$\text{layout\_seed} = \text{const}, \quad \text{seed}_b = \text{base\_seed} + 10000 \times b$$</div>
+  <p>베이스라인 $b$마다 시뮬레이션 RNG는 독립적이나, 노드 위치는 동일하게 유지된다.</p>
+
+  <h3>3.2 링 배치 (Ring Layout)</h3>
+  <p>모든 노드를 게이트웨이로부터 동일한 거리 $r_{\rm ring}$의 원 위에 배치한다:</p>
+  <div class="math-block">$$r_{\rm ring} = \rho \cdot R_{\rm cell}, \quad \rho \in (0, 1]$$</div>
+  <p>$\rho$는 <code>fixed_distance_ratio</code> 파라미터 (기본값 0.5)이다. 각 노드의 각도 $\phi_i$는 균등 분포에서 무작위로 샘플링된다:</p>
+  <div class="math-block">$$\phi_i \sim \mathcal{U}(0,\, 2\pi), \quad i = 1, \ldots, N$$</div>
+  <blockquote>링 배치에서 모든 노드는 동일한 경로손실을 가지므로 SNR이 균일하게 분포된다. 거리 기반 SF 다양성을 활용하는 전략에게는 불리하므로, <strong>통제 실험 목적</strong> 이외에는 사용을 권장하지 않는다.</blockquote>
+
+  <h3>3.3 무작위 배치 (Random Layout)</h3>
+  <p>노드를 반경 $R_{\rm cell}$의 원판 내에 균일하게 배치한다:</p>
+  <div class="math-block">$$r_i = R_{\rm cell}\sqrt{u_i}, \quad \phi_i = 2\pi v_i, \quad u_i,\, v_i \sim \mathcal{U}(0, 1)$$</div>
+  <div class="math-block">$$x_i^{\rm pos} = r_i \cos\phi_i, \quad y_i^{\rm pos} = r_i \sin\phi_i$$</div>
+  <p>이 변환은 면적에 비례한 균일 분포를 보장한다. 노드 간 거리 이질성이 확보되므로 <strong>기본 배치 방식</strong>으로 사용된다.</p>
+  <blockquote><strong>비고:</strong> $x_i^{\rm pos}$, $y_i^{\rm pos}$는 노드 $i$의 위치 좌표로, Q-learning 상태 인덱스 $x_t$와 구분하기 위해 위첨자 pos를 사용한다.</blockquote>
+  <hr>
+
+  <!-- ===== Section 4 ===== -->
+  <h2 id="s4">4. 트래픽 모델</h2>
+
+  <h3>4.1 패킷 도착 과정</h3>
+  <p>각 노드에서 패킷 도착은 독립적인 베르누이 과정을 따른다. 슬롯 $t$에서 노드 $i$의 패킷 도착 지시자 $\Lambda_i(t) \in \{0, 1\}$은 다음 확률을 따른다:</p>
+  <div class="math-block">$$\Pr\bigl[\Lambda_i(t) = 1\bigr] = p_{\rm arr} = \min\!\left(\frac{G \cdot N_{\rm res}}{N},\; 1\right)$$</div>
+  <p>여기서 $G$는 목표 제공 부하, $N_{\rm res} = N_{\rm SF} \times N_{\rm ch}$는 총 직교 자원 수이다.</p>
+
+  <h3>4.2 큐 모드</h3>
+  <p>두 가지 큐 운영 방식이 지원된다:</p>
+  <p><strong>Accumulate 모드:</strong></p>
+  <div class="math-block">$$q_i(t) = q_i(t-1) + \Lambda_i(t)$$</div>
+  <p>미전송 패킷은 큐에 누적된다. 연속 실패 횟수 $m_i(t)$는 동일 패킷에 대해 누적된다.</p>
+  <p><strong>Fresh 모드:</strong></p>
+  <div class="math-block">$$q_i(t) = \Lambda_i(t)$$</div>
+  <p>매 슬롯마다 이전 패킷을 버리고 새 패킷을 0 또는 1개 받는다. 단, $m_i(t)$(<strong>연속 실패 횟수</strong>)는 패킷 경계에서 리셋하지 않는다. 전송 성공 시에만 $m_i \leftarrow 0$으로 초기화된다. 이는 accumulate 모드와 동일한 의미론이며, fresh 모드에서도 Q-learning 상태의 <code>failure_level</code> 차원이 유효한 정보를 갖게 한다.</p>
+  <hr>
+
+  <!-- ===== Section 5 ===== -->
+  <h2 id="s5">5. 리소스 구조 및 제공 부하</h2>
+
+  <h3>5.1 직교 자원</h3>
+  <p>LoRa의 다중 SF와 다중 채널이 만드는 직교 자원의 총 수는:</p>
+  <div class="math-block">$$N_{\rm res} = N_{\rm SF} \times N_{\rm ch} = 6 \times N_{\rm ch}$$</div>
+  <p>기본 설정 $N_{\rm ch} = 3$에서 $N_{\rm res} = 18$개의 직교 자원이 존재한다.</p>
+  <blockquote><strong>ToA 단순화 주의:</strong> 실제 LoRa에서 SF별 ToA는 SF7 ≈ 41 ms에서 SF12 ≈ 1318 ms로 최대 32배 차이가 난다. 본 시뮬레이터는 모든 SF가 동일하게 슬롯 1개를 점유한다고 가정한다. 자세한 내용은 <a href="#s13">섹션 13.1</a>을 참조하라.</blockquote>
+
+  <h3>5.2 제공 부하 정의</h3>
+  <div class="math-block">$$G = \frac{N \cdot p_{\rm arr}}{N_{\rm res}}$$</div>
+  <p>$G = 1$은 슬롯당 자원 1개당 평균 1회 전송 시도에 해당하며, Slotted ALOHA의 이론적 처리량 최대점이다.</p>
+  <hr>
+
+  <!-- ===== Section 6 ===== -->
+  <h2 id="s6">6. 전송 결정 모델</h2>
+
+  <h3>6.1 슬롯 구조</h3>
+  <p>시뮬레이터는 이산 시간 슬롯 모델을 사용한다. 각 슬롯 $t$에서 노드 $i$는 다음 순서로 동작한다:</p>
+  <ol>
+    <li>패킷 도착: $\Lambda_i(t)$ 판정 → $q_i(t)$ 갱신</li>
+    <li>백오프 감소: $b_i(t) \leftarrow \max\bigl(0,\; b_i(t-1) - 1\bigr)$</li>
+    <li>전송 가능 조건: $q_i(t) > 0$ 이고 $b_i(t) = 0$ 인 경우에만 컨트롤러 호출</li>
+    <li>SF $k_i(t) \in \{0,\ldots,5\}$ 및 채널 $c_i(t) \in \{0,\ldots,N_{\rm ch}-1\}$ 선택</li>
+    <li>충돌 및 링크 실패 판정</li>
+    <li>게이트웨이 부하 추정 갱신</li>
+    <li>결과 반영 및 학습</li>
+  </ol>
+
+  <h3>6.2 SF 초기화</h3>
+  <p>시뮬레이션 시작 시 각 노드의 초기 SF 인덱스는 균등 분포에서 무작위로 샘플링된다:</p>
+  <div class="math-block">$$k_i(0) \sim \mathcal{U}\{0, 1, 2, 3, 4, 5\}$$</div>
+  <p>ADR-like 및 Retry-Aware 컨트롤러는 <code>begin_run()</code> 단계에서 노드별 SNR 기반의 정적 SF로 덮어쓴다. Q-learning 컨트롤러는 랜덤 초기 SF에서 시작하여 탐색을 통해 최적 SF를 학습한다.</p>
+  <hr>
+
+  <!-- ===== Section 7 ===== -->
+  <h2 id="s7">7. 충돌 및 링크 실패 모델</h2>
+
+  <h3>7.1 충돌 조건</h3>
+  <p>동일 슬롯 $t$에서 동일 자원 $(k, c)$를 사용하는 노드가 2개 이상인 경우, 해당 자원의 모든 전송은 충돌로 판정된다:</p>
+  <div class="math-block">$$\text{COLLISION on } (k,c) \iff \bigl|\{i : k_i(t) = k,\; c_i(t) = c\}\bigr| \geq 2$$</div>
+  <p>충돌 판정은 링크 품질과 무관하게 우선 적용된다.</p>
+  <blockquote><strong>단순화:</strong> 실제 LoRa 수신기는 캡처 효과(capture effect)를 통해 신호 강도가 충분히 강한 패킷은 충돌 중에도 복조할 수 있다. 본 시뮬레이터는 이를 모델링하지 않는다.</blockquote>
+
+  <h3>7.2 링크 성공 조건 (하드 임계값 모델)</h3>
+  <p>단독 전송(충돌 없음)에 대해 하드 임계값 기반의 결정론적 링크 성공 판정을 적용한다:</p>
+  <div class="math-block">$$\mathrm{margin}_i(t) = \mathrm{SNR}(d_i) - \theta_{k_i(t)}$$</div>
+  <div class="math-block">$$\text{결과}_i(t) = \begin{cases} \text{SUCCESS}    &amp; \mathrm{margin}_i(t) \geq 0 \\ \text{FAIL\_LINK} &amp; \mathrm{margin}_i(t) < 0 \end{cases}$$</div>
+  <blockquote><strong>비고:</strong> 이전 구현에서는 시그모이드 함수 $P_{\rm success} = 1/(1 + e^{-\mathrm{margin}})$를 사용한 확률적 모델을 적용하였으나, 섀도잉이 없는 결정론적 경로손실 모델과의 일관성을 위해 하드 임계값 모델로 교체하였다.</blockquote>
+
+  <h3>7.3 결과 코드 요약</h3>
+  <table>
+    <tr><th>코드</th><th>의미</th><th>조건</th></tr>
+    <tr><td><code>OUTCOME_IDLE</code> (0)</td><td>전송 없음</td><td>$q_i(t) = 0$ 또는 $b_i(t) > 0$</td></tr>
+    <tr><td><code>OUTCOME_SUCCESS</code> (1)</td><td>성공</td><td>단독 전송 + $\mathrm{margin}_i(t) \geq 0$</td></tr>
+    <tr><td><code>OUTCOME_FAIL_COLLISION</code> (2)</td><td>충돌 실패</td><td>동일 $(k,c)$ 복수 전송</td></tr>
+    <tr><td><code>OUTCOME_FAIL_LINK</code> (3)</td><td>링크 실패</td><td>단독 전송 + $\mathrm{margin}_i(t) < 0$</td></tr>
+  </table>
+  <p>노드는 ACK 부재 시 실패로 인식하나, <strong>충돌 실패와 링크 실패를 구분하지 못한다</strong>.</p>
+  <hr>
+
+  <!-- ===== Section 8 ===== -->
+  <h2 id="s8">8. 게이트웨이 피드백 모델</h2>
+
+  <h3>8.1 부하 추정 방식</h3>
+  <p>게이트웨이($g=0$)는 각 채널의 혼잡도를 추정하여 모든 노드에 브로드캐스트한다고 가정한다. 채널 $c$의 추정 제공 부하는 길이 $W_{\rm gw}$ 슬롯의 롤링 윈도우로 계산된다:</p>
+  <div class="math-block">$$\hat{G}_c(t) = \frac{1}{W_{\rm gw} \cdot N_{\rm SF}} \sum_{\tau=t-W_{\rm gw}+1}^{t} n_c(\tau)$$</div>
+  <p>$W_{\rm gw} = 50$ (기본값)은 에폭 길이 $T_{\rm epoch}$와 독립적인 파라미터이다.</p>
+
+  <h3>8.2 GW 관측 모드 (<code>gw_obs_mode</code>)</h3>
+  <p>$n_c(\tau)$의 정의에 따라 두 모드로 분기된다:</p>
+  <p><strong><code>attempt</code> 모드 (기본값)</strong> — GW가 캐리어 센싱으로 전체 트래픽을 파악한다고 가정:</p>
+  <div class="math-block">$$n_c^{\rm att}(\tau) = \bigl|\{i : c_i(\tau) = c,\; \text{전송 시도}\}\bigr|$$</div>
+  <p>충돌·링크 실패 패킷을 포함하므로 실제 채널 부하를 반영한다.</p>
+  <p><strong><code>success</code> 모드</strong> — GW가 디코딩 가능한 정보만 사용:</p>
+  <div class="math-block">$$n_c^{\rm suc}(\tau) = \bigl|\{i : c_i(\tau) = c,\; \text{OUTCOME\_SUCCESS}\}\bigr|$$</div>
+  <p>$n_c^{\rm suc}(\tau) \leq n_c^{\rm att}(\tau)$이므로 혼잡할수록 $\hat{G}_c$가 과소추정된다.</p>
+
+  <h3>8.3 부하 양자화</h3>
+  <p>추정 부하 $\hat{G}_c(t)$는 3단계 bin으로 양자화된다:</p>
+  <div class="math-block">$$\mathrm{bin}(\hat{G}_c) = \begin{cases} 0 \;\text{(Low)}  &amp; \hat{G}_c < \ell_{\rm lo} \\ 1 \;\text{(Mid)}  &amp; \ell_{\rm lo} \leq \hat{G}_c \leq \ell_{\rm hi} \\ 2 \;\text{(High)} &amp; \hat{G}_c > \ell_{\rm hi} \end{cases}$$</div>
+  <table>
+    <tr><th>모드</th><th>$\ell_{\rm lo}$</th><th>$\ell_{\rm hi}$</th><th>상한</th><th>설계 기준</th></tr>
+    <tr><td><code>attempt</code></td><td>0.7</td><td>1.3</td><td>무제한</td><td>$G=1$ 처리량 피크를 Mid 중심에 배치</td></tr>
+    <tr><td><code>success</code></td><td>0.33</td><td>0.67</td><td>1.0</td><td>$[0,1]$ 균등 3분할, $1/e \approx 0.37$이 Mid 내 위치</td></tr>
+  </table>
+  <p>Q-learning 상태 인코딩에 사용하는 최대 혼잡도 bin:</p>
+  <div class="math-block">$$\hat{g}_{\rm max}(t) = \max_{c \in \{0,\ldots,N_{\rm ch}-1\}} \mathrm{bin}\!\bigl(\hat{G}_c(t)\bigr) \;\in\; \{0,1,2\}$$</div>
+  <hr>
+
+  <!-- ===== Section 9 ===== -->
+  <h2 id="s9">9. 성능 지표</h2>
+  <p>측정 구간 $[T_{\rm warm},\, T_{\rm total})$, 즉 $T_{\rm meas} = T_{\rm total} - T_{\rm warm}$ 슬롯에서 다음 지표를 수집한다.</p>
+
+  <h3>9.1 패킷 성공률 (ASR)</h3>
+  <div class="math-block">$$\mathrm{ASR} = \frac{\displaystyle\sum_{i=1}^{N} S_i}{\displaystyle\sum_{i=1}^{N} A_i}$$</div>
+
+  <h3>9.2 처리량</h3>
+  <div class="math-block">$$\mathrm{Throughput} = \frac{\displaystyle\sum_{i=1}^{N} S_i}{T_{\rm meas}} \quad [\text{packets/slot}]$$</div>
+
+  <h3>9.3 충돌률</h3>
+  <div class="math-block">$$\mathrm{CR} = \frac{\displaystyle\sum_{i=1}^{N} C_i}{\displaystyle\sum_{i=1}^{N} A_i}$$</div>
+
+  <h3>9.4 총 전송 시도 횟수</h3>
+  <div class="math-block">$$A_{\rm total} = \sum_{i=1}^{N} A_i$$</div>
+  <p>정책별 전송 적극성(aggressiveness)을 직접 비교하는 지표이다.</p>
+
+  <h3>9.5 실현 제공 부하</h3>
+  <div class="math-block">$$G_{\rm att} = \frac{A_{\rm total}}{N_{\rm res} \cdot T_{\rm meas}}$$</div>
+
+  <h3>9.6 평균 백로그</h3>
+  <div class="math-block">$$\bar{Q} = \frac{1}{T_{\rm meas} \cdot N} \sum_{t=T_{\rm warm}}^{T_{\rm total}-1} \sum_{i=1}^{N} q_i(t) \quad [\text{packets/node}]$$</div>
+
+  <h3>9.7 공정성 (Jain's Fairness Index)</h3>
+  <div class="math-block">$$\mathcal{F} = \frac{\left(\displaystyle\sum_{i=1}^{N} S_i\right)^2}{N \cdot \displaystyle\sum_{i=1}^{N} S_i^2} \;\in\; \left[\frac{1}{N},\; 1\right]$$</div>
+  <p>$\mathcal{F} = 1$은 완전 공정, $\mathcal{F} = 1/N$은 완전 불공정을 의미한다.</p>
+
+  <h3>9.8 Min/Max 비율</h3>
+  <div class="math-block">$$\mathrm{MinMax} = \frac{\min_i S_i}{\max_i S_i}$$</div>
+  <p>최악 노드와 최선 노드 간 성공 횟수 비율로, $\mathcal{F}$보다 극단값에 민감하다.</p>
+  <hr>
+
+  <!-- ===== Section 10 ===== -->
+  <h2 id="s10">10. MAC 전략 모델</h2>
+
+  <h3>10.1 Pure ALOHA</h3>
+  <p>매 슬롯마다 SF와 채널을 균등 무작위 선택한다:</p>
+  <div class="math-block">$$k_i(t) \sim \mathcal{U}\{0,\ldots,5\}, \quad c_i(t) \sim \mathcal{U}\{0,\ldots,N_{\rm ch}-1\}$$</div>
+  <p>패킷이 있으면 무조건 전송한다. 학습 없음. 무작위 배치 환경에서 SNR이 낮은 먼 노드는 유효 SF가 제한되어 구조적으로 낮은 공정성을 보인다.</p>
+
+  <h3>10.2 ADR-like</h3>
+  <p>시뮬레이션 시작 시 각 노드의 $\mathrm{SNR}(d_i)$에 기반하여 SF를 정적으로 할당하고 고정한다:</p>
+  <div class="math-block">$$k_i^* = \min\bigl\{k \in \{0,\ldots,5\} : \mathrm{SNR}(d_i) \geq \theta_k + \delta_{\rm adr}\bigr\}$$</div>
+  <p>$\delta_{\rm adr} = 1.0$ dB. 채널 $c_i(t)$는 매 슬롯 균등 무작위 선택. SF 다양성을 통해 Pure ALOHA 대비 충돌을 감소시키며, 거리 이질성이 있는 무작위 배치에서 공정성이 향상된다.</p>
+  <blockquote><strong>주의:</strong> 링 배치에서는 모든 노드가 동일한 SNR을 가지므로 전체 노드에 동일한 $k^*$가 할당되어, Pure ALOHA보다 오히려 성능이 저하될 수 있다.</blockquote>
+
+  <h3>10.3 Retry-Aware (지수 백오프)</h3>
+  <p>ADR-like와 동일한 SF 초기화 후, 실패 시 지수적 백오프를 적용한다:</p>
+  <div class="math-block">$$b_i(t) \sim \mathcal{U}\bigl\{0,\; W(m_i)\bigr\}$$</div>
+  <div class="math-block">$$W(m) = \min\!\left(W_{\rm max},\; W_0 \cdot 2^{\max(m-1,\, 0)}\right)$$</div>
+  <p>$W_0 = 2$ (기본 윈도우), $W_{\rm max} = 64$ (최대 윈도우), $m_i = m_i(t)$: 현재 연속 실패 횟수. 성공 시 즉시 $b_i = 0$ 초기화.</p>
+
+  <h3>10.4 EXP3 MAB (LoRa-MAB)</h3>
+  <p>각 노드는 $M = N_{\rm SF} \times N_{\rm ch}$개의 자원 팔(arm)에 대해 EXP3 알고리즘으로 독립적인 가중치를 유지한다. IDLE 팔 포함 변형(<code>with_idle=True</code>)에서는 팔 수가 $M+1$로 확장된다.</p>
+  <p><strong>선택 확률 및 가중치 갱신:</strong></p>
+  <div class="math-block">$$\pi_{i,a}(t) = \frac{w_{i,a}(t)}{\displaystyle\sum_{a'} w_{i,a'}(t)}, \quad a_t \sim \pi_i(t)$$</div>
+  <div class="math-block">$$w_{i,a}(t+1) = w_{i,a}(t) \cdot \exp\!\left(\frac{\eta_{\rm exp3} \cdot \hat{r}_t}{\pi_{i,a_t}(t)}\right), \quad \hat{r}_t = r_t \cdot \mathbf{1}[a = a_t]$$</div>
+  <p>$\eta_{\rm exp3} = 0.1$ (기본값). 가중치는 팔을 선택했을 때만 갱신되며, 중요도 샘플링(importance sampling) 보정을 통해 비선택 팔의 추정 편향을 제거한다.</p>
+  <table>
+    <tr><th>변형 키</th><th>IDLE 팔</th><th>실패 보상 $r_{\rm fail}$</th><th>설명</th></tr>
+    <tr><td><code>lora_mab</code></td><td>없음</td><td>0.0</td><td>기본 EXP3, 실패 시 무보상</td></tr>
+    <tr><td><code>lora_mab_neg</code></td><td>없음</td><td>−1.0</td><td>실패 페널티로 나쁜 팔 회피 가속</td></tr>
+    <tr><td><code>lora_mab_idle</code></td><td>있음</td><td>0.0</td><td>IDLE 팔 추가: 혼잡 시 전송 포기 학습</td></tr>
+    <tr><td><code>lora_mab_idle_neg</code></td><td>있음</td><td>−1.0</td><td>IDLE + 실패 페널티 조합</td></tr>
+  </table>
+  <p>성공 보상 = +1 고정. 기반 알고리즘: LoRa-MAB (IEEE GLOBECOM Workshops 2019).</p>
+
+  <h3>10.5 Thompson Sampling MAB</h3>
+  <p>각 팔 $a$에 대해 Beta 사후분포를 유지하고, 매 슬롯 샘플링으로 가장 높은 값을 보인 팔을 선택한다:</p>
+  <div class="math-block">$$\hat{\mu}_{i,a}(t) \sim \mathrm{Beta}\!\bigl(\alpha_{i,a}(t),\; \beta_{i,a}(t)\bigr), \quad a_t = \arg\max_a \hat{\mu}_{i,a}(t)$$</div>
+  <p><strong>파라미터 갱신:</strong></p>
+  <div class="math-block">$$(\alpha_{i,a},\, \beta_{i,a}) \leftarrow \begin{cases} (\alpha_{i,a} + 1,\; \beta_{i,a})     &amp; \text{결과} = \text{SUCCESS} \\ (\alpha_{i,a},\; \beta_{i,a} + 1)     &amp; \text{결과} \in \{\text{COLLISION},\, \text{LINK\_FAIL}\} \end{cases}$$</div>
+  <p>초기값 $\alpha = \beta = 1$ (균등 사전분포). Beta-Bernoulli 켤레 쌍을 이용하므로 갱신이 닫힌형(closed-form)으로 처리된다. 희소 보상(sparse reward) 환경에서 EXP3 대비 수렴이 빠르다.</p>
+  <table>
+    <tr><th>변형 키</th><th>IDLE 팔</th></tr>
+    <tr><td><code>thompson_mab</code></td><td>없음</td></tr>
+    <tr><td><code>thompson_mab_idle</code></td><td>있음</td></tr>
+  </table>
+
+  <h3>10.6 Dual-MAB (ACB + Resource-MAB + Backoff-MAB)</h3>
+  <p>접근 제어와 자원 선택을 두 단계의 독립적인 MAB로 분리하여 분산 학습한다.</p>
+  <h4>ACB (Access Class Barring)</h4>
+  <p>슬롯마다 균등 확률 $u \sim \mathcal{U}(0,1)$를 추출하여 차단 여부를 결정한다:</p>
+  <div class="math-block">$$\text{barred}_i(t) = \begin{cases} \text{True}  &amp; u < b \\ \text{False} &amp; \text{otherwise} \end{cases}$$</div>
+  <p>$b \in [0,1]$: ACB 차단 확률 파라미터. 대시보드 슬라이더로 조정 가능 (기본값 0.3). $b = 0$이면 ACB 비활성화 (<code>dual_mab_no_acb</code> 변형에 해당).</p>
+  <h4>Resource-MAB ($\varepsilon$-greedy EMA)</h4>
+  <p>차단되지 않은 노드는 $M = N_{\rm SF} \times N_{\rm ch}$개 팔 중 $\varepsilon$-greedy로 선택하고, 지수이동평균(EMA)으로 가중치를 갱신한다:</p>
+  <div class="math-block">$$Q_{i,a}^{\rm res}(t+1) = \begin{cases} (1-\alpha_{\rm ema})\,Q_{i,a}^{\rm res}(t) + \alpha_{\rm ema}\cdot r_t &amp; a = a_t \\ Q_{i,a}^{\rm res}(t) &amp; a \neq a_t \end{cases}$$</div>
+  <h4>Backoff-MAB</h4>
+  <p>이전 전송 결과에 따라 백오프 길이를 학습하는 보조 MAB. ACB와 함께 네트워크 부하를 분산적으로 제어한다.</p>
+  <table>
+    <tr><th>변형 키</th><th>ACB $b$</th><th>비고</th></tr>
+    <tr><td><code>dual_mab</code></td><td>0.3 (기본, 조정 가능)</td><td>대시보드 슬라이더로 $b \in [0, 1]$ 설정</td></tr>
+    <tr><td><code>dual_mab_no_acb</code></td><td>0.0 (고정)</td><td>순수 Resource-MAB, ablation 기준선</td></tr>
+  </table>
+  <hr>
+
+  <!-- ===== Section 11 ===== -->
+  <h2 id="s11">11. Q-learning 컨트롤러</h2>
+
+  <h3>11.1 분산형 구조</h3>
+  <p>각 노드 $i$는 독립적인 Q-테이블 $Q_i(x, a)$와 탐색 파라미터 $\epsilon_i$를 유지한다. 노드 간 Q-테이블 공유 없음. $x \in \mathcal{S}$는 Q-learning 상태 인덱스이며, $a \in \mathcal{A}$는 액션이다.</p>
+
+  <h3>11.2 액션 공간</h3>
+  <div class="math-block">$$|\mathcal{A}| = 1 + 3 \times N_{\rm ch}$$</div>
+  <p>$N_{\rm ch} = 3$일 때 $|\mathcal{A}| = 10$:</p>
+  <table>
+    <tr><th>액션 $a$</th><th>의미</th></tr>
+    <tr><td>0</td><td>IDLE (전송 포기)</td></tr>
+    <tr><td>$1 \sim N_{\rm ch}$</td><td>SF 유지 ($k_i$ 불변), 채널 $c = 0 \sim N_{\rm ch}-1$</td></tr>
+    <tr><td>$N_{\rm ch}+1 \sim 2N_{\rm ch}$</td><td>$k_i \leftarrow k_i + 1$, 채널 $c = 0 \sim N_{\rm ch}-1$</td></tr>
+    <tr><td>$2N_{\rm ch}+1 \sim 3N_{\rm ch}$</td><td>$k_i \leftarrow k_i - 1$, 채널 $c = 0 \sim N_{\rm ch}-1$</td></tr>
+  </table>
+  <p>SF 변화 후 $k_i(t)$는 $\{0, \ldots, 5\}$ 범위로 클램핑된다.</p>
+
+  <h3>11.3 상태 공간 변형</h3>
+  <p>상태 벡터는 다음 3개의 후보 차원 중 일부로 구성된다:</p>
+  <table>
+    <tr><th>차원 기호</th><th>의미</th><th>범위</th><th>차원 크기</th></tr>
+    <tr><td>$k_i(t)$</td><td>현재 SF 인덱스</td><td>$\{0,\ldots,5\}$</td><td>6</td></tr>
+    <tr><td>$f_{\rm level}$</td><td>연속 실패 레벨</td><td>$\{0,1,2,3\}$</td><td>4</td></tr>
+    <tr><td>$\hat{g}_{\rm max}(t)$</td><td>최대 혼잡도 bin</td><td>$\{0,1,2\}$</td><td>3</td></tr>
+  </table>
+  <p><strong>실패 레벨 $f_{\rm level}$</strong>은 연속 실패 횟수 $m_i(t)$를 다음과 같이 이산화한다:</p>
+  <div class="math-block">$$f_{\rm level} = \begin{cases} 0 &amp; m_i(t) = 0 \;\text{(직전 성공 또는 전송 없음)} \\ 1 &amp; m_i(t) = 1 \\ 2 &amp; 2 \leq m_i(t) \leq 3 \\ 3 &amp; m_i(t) \geq 4 \end{cases}$$</div>
+  <p><strong>상태 변형 목록:</strong></p>
+  <table>
+    <tr><th>변형 키</th><th>포함 차원</th><th>$|\mathcal{S}|$</th><th>플랫 인덱스 $x$</th></tr>
+    <tr><td><code>s2_compact</code></td><td>$k_i$, $f_{\rm level}$, $\hat{g}_{\rm max}$</td><td>$6 \times 4 \times 3 = 72$</td><td>$k_i \times 12 + f_{\rm level} \times 3 + \hat{g}_{\rm max}$</td></tr>
+    <tr><td><code>s3_no_sf</code></td><td>$f_{\rm level}$, $\hat{g}_{\rm max}$</td><td>$4 \times 3 = 12$</td><td>$f_{\rm level} \times 3 + \hat{g}_{\rm max}$</td></tr>
+    <tr><td><code>s4_no_fl</code></td><td>$k_i$, $\hat{g}_{\rm max}$</td><td>$6 \times 3 = 18$</td><td>$k_i \times 3 + \hat{g}_{\rm max}$</td></tr>
+    <tr><td><code>s5_no_gmax</code></td><td>$k_i$, $f_{\rm level}$</td><td>$6 \times 4 = 24$</td><td>$k_i \times 4 + f_{\rm level}$</td></tr>
+    <tr><td><code>s6_sf_only</code></td><td>$k_i$</td><td>$6$</td><td>$k_i$</td></tr>
+    <tr><td><code>s7_sf_gch</code></td><td>$k_i$, $\mathrm{bin}(\hat{G}_{c=0})$, $\mathrm{bin}(\hat{G}_{c=1})$, $\mathrm{bin}(\hat{G}_{c=2})$</td><td>$6 \times 3^3 = 162$</td><td>$k_i \times 27 + \mathrm{bin}(\hat{G}_0) \times 9 + \mathrm{bin}(\hat{G}_1) \times 3 + \mathrm{bin}(\hat{G}_2)$</td></tr>
+  </table>
+  <blockquote><code>s3_no_sf</code>는 $k_i$를 상태에서 제거하므로 SF7/SF12 노드가 동일한 Q-테이블 항목을 공유한다. 이는 거리 이질성에 의한 상태 분리를 줄여 먼 노드와 가까운 노드 간 암묵적 평등화 효과를 낼 수 있다.</blockquote>
+
+  <h3>11.4 보상 함수 변형</h3>
+  <p>노드는 실패 원인(충돌/링크 실패)을 구분할 수 없으므로 단일 실패 페널티를 사용한다.</p>
+
+  <h4>v6_signal (기본값) — 대칭 신호 보상</h4>
+  <div class="math-block">$$r_t^{v6} = \begin{cases} +1.0   &amp; \text{결과}_i(t) = \text{SUCCESS} \\ -1.0   &amp; \text{결과}_i(t) \in \{\text{FAIL\_COLLISION},\, \text{FAIL\_LINK}\} \\ -0.02  &amp; \text{결과}_i(t) = \text{IDLE},\; q_i(t) > 0 \\ \phantom{-}0.0  &amp; \text{결과}_i(t) = \text{IDLE},\; q_i(t) = 0 \end{cases}$$</div>
+
+  <h4>v7_asymmetric, v8_fairness, v9_log_thr — 복합(Composite) 보상</h4>
+  <p>v7/v8/v9는 처리량·공정성을 동시에 최적화하는 <strong>복합 보상(composite reward)</strong>을 사용한다:</p>
+  <div class="math-block">$$r_t^{\rm cmp} = \begin{cases} r_{\rm base} + \dfrac{r_{\rm fair}}{1 + \nu_i(t)} &amp; \text{결과}_i(t) = \text{SUCCESS} \\[8pt] r_{\rm fail}  &amp; \text{결과}_i(t) \in \{\text{FAIL\_COLLISION},\, \text{FAIL\_LINK}\} \\[2pt] -0.02  &amp; \text{결과}_i(t) = \text{IDLE},\; q_i(t) > 0 \\ \phantom{-}0.0  &amp; \text{결과}_i(t) = \text{IDLE},\; q_i(t) = 0 \end{cases}$$</div>
+  <p>여기서 $\nu_i(t)$는 에폭 내 성공 횟수의 전체 평균 대비 정규화값이다:</p>
+  <div class="math-block">$$\nu_i(t) = \frac{n_i^{\rm ep}(t)}{\max\!\bigl(1,\; \bar{n}^{\rm ep}(t)\bigr)}, \quad \bar{n}^{\rm ep}(t) = \frac{1}{N}\sum_{j=1}^{N} n_j^{\rm ep}(t)$$</div>
+  <p>$n_i^{\rm ep}(t)$: 현재 에폭 시작 이후 노드 $i$의 누적 성공 횟수 (에폭 경계 $T_{\rm epoch}$마다 초기화).</p>
+  <p><strong>설계 원리:</strong></p>
+  <ul>
+    <li>$\nu_i = 0$: 에폭 내 첫 번째 성공 → 보상 = $r_{\rm base} + r_{\rm fair}$ (최대)</li>
+    <li>$\nu_i = 1$: 노드 $i$가 평균과 동일 → 보상 = $r_{\rm base} + r_{\rm fair}/2$</li>
+    <li>$\nu_i \to \infty$: 과도한 성공 → 보상 → $r_{\rm base}$ (기저값으로 수렴)</li>
+  </ul>
+  <p>기저값 $r_{\rm base} > 0$이 항상 존재하므로, 장기 시뮬레이션에서도 보상이 0으로 붕괴하지 않는다.</p>
+  <table>
+    <tr><th>변형</th><th>$r_{\rm base}$</th><th>$r_{\rm fair}$</th><th>$r_{\rm fail}$</th><th>성공 보상 범위</th><th>설계 목표</th></tr>
+    <tr><td><code>v7_asymmetric</code></td><td>0.5</td><td>0.5</td><td>−1.0</td><td>$[0.5,\; 1.0]$</td><td>ASR·처리량·공정성 균형</td></tr>
+    <tr><td><code>v8_fairness</code></td><td>0.3</td><td>0.7</td><td>−1.0</td><td>$[0.3,\; 1.0]$</td><td>공정성 우선</td></tr>
+    <tr><td><code>v9_log_thr</code></td><td>0.6</td><td>0.4</td><td>−0.7</td><td>$[0.6,\; 1.0]$</td><td>탐색 허용, 처리량 중심</td></tr>
+  </table>
+
+  <h3>11.5 Q-update (TD(0))</h3>
+  <div class="math-block">$$Q_i(x_t, a_t) \;\leftarrow\; Q_i(x_t, a_t) + \alpha \Bigl[ r_t + \gamma \max_{a'} Q_i(x_{t+1}, a') - Q_i(x_t, a_t) \Bigr]$$</div>
+  <table>
+    <tr><th>하이퍼파라미터</th><th>기호</th><th>기본값</th></tr>
+    <tr><td>학습률</td><td>$\alpha$</td><td>0.1</td></tr>
+    <tr><td>할인율</td><td>$\gamma$</td><td>0.9</td></tr>
+    <tr><td>초기 탐색률</td><td>$\epsilon_0$</td><td>1.0</td></tr>
+    <tr><td>최소 탐색률</td><td>$\epsilon_{\rm min}$</td><td>0.05</td></tr>
+    <tr><td>탐색률 감쇠 계수</td><td>$\epsilon_{\rm decay}$</td><td>0.9995</td></tr>
+  </table>
+  <p>탐색률 감쇠는 매 슬롯 노드별 독립적으로 적용된다:</p>
+  <div class="math-block">$$\epsilon_i(t+1) = \max\!\bigl(\epsilon_{\rm min},\; \epsilon_i(t) \cdot \epsilon_{\rm decay}\bigr)$$</div>
+
+  <h3>11.6 다음 상태 인코딩 시점</h3>
+  <p>TD 업데이트에 사용하는 다음 상태 $x_{t+1}$은 <strong>슬롯 $t$ 결과 판정 완료 후</strong> 갱신된 $\hat{g}_{\rm max}(t)$를 사용하여 인코딩된다. GW 부하 추정은 충돌·링크 판정이 완료된 이후에 수행되며, 그 결과가 <code>gateway_info</code>로 전달된다. 이전 슬롯의 $\hat{g}_{\rm max}$를 사용할 경우 TD 타겟에 1-슬롯 시차 오류가 발생한다.</p>
+  <hr>
+
+  <!-- ===== Section 12 ===== -->
+  <h2 id="s12">12. 시뮬레이션 구현 및 최적화</h2>
+
+  <h3>12.1 벡터화 배치 경로</h3>
+  <p><code>DecentralizedQLearningController</code>가 <strong>배치 경로 지원 상태 변형</strong> (<code>s2_compact</code>, <code>s3_no_sf</code>, <code>s4_no_fl</code>, <code>s5_no_gmax</code>) 중 하나를 사용하는 경우, 시뮬레이터는 per-node Python 루프 대신 numpy 기반 배치 경로를 활성화한다 (<code>SUPPORTS_BATCH = True</code>).</p>
+  <table>
+    <tr><th>연산</th><th>표준 경로</th><th>배치 경로</th></tr>
+    <tr><td>Q-테이블 자료구조</td><td><code>defaultdict(dict)</code> × $N$</td><td>dense <code>ndarray</code> $(N,\, |\mathcal{S}|,\, |\mathcal{A}|)$</td></tr>
+    <tr><td>상태 인코딩</td><td>tuple 생성 × $N$</td><td>정수 산술 벡터 연산</td></tr>
+    <tr><td>$\epsilon$-greedy 탐색</td><td>Python <code>random()</code> × $N$</td><td><code>np.random</code> 1회 호출</td></tr>
+    <tr><td>TD 업데이트</td><td>Python 스칼라 루프 × $N$</td><td>numpy 인덱싱 + 벡터 연산</td></tr>
+    <tr><td>패킷 도착</td><td><code>rng.random()</code> × $N$</td><td><code>np_rng.random(N)</code> 1회</td></tr>
+    <tr><td>충돌 판정</td><td>Python <code>Counter</code></td><td><code>np.unique</code></td></tr>
+    <tr><td>통계 집계</td><td>Python 조건문 루프</td><td>numpy boolean indexing</td></tr>
+  </table>
+  <p><code>_encode_batch()</code> 메서드는 <code>state_variant</code> 키를 기준으로 디스패치되어 각 변형에 맞는 플랫 인덱스 $x_t$를 반환한다.</p>
+  <p><strong>속도 향상:</strong> $N=60$, $T_{\rm total}=20{,}000$ 기준 표준 경로 대비 약 <strong>3.2배</strong> 향상.</p>
+
+  <h3>12.2 G/N 스윕 병렬화</h3>
+  <p>G/N 스윕 실험은 각 (베이스라인, $G$값) 조합을 독립적인 잡(job)으로 분리하여 멀티프로세싱으로 병렬 실행한다. Windows 환경의 Streamlit과의 호환성을 위해 <code>spawn</code> 컨텍스트를 명시한다.</p>
+  <div class="math-block">$$\text{speedup} \approx \min(P_{\rm cpu},\; N_{\rm jobs})$$</div>
+  <p>$P_{\rm cpu}$: 가용 CPU 코어 수. $N=60$, 30-point G-sweep 기준 실측 <strong>약 4.6배</strong> 향상.</p>
+  <hr>
+
+  <!-- ===== Section 13 ===== -->
+  <h2 id="s13">13. 모델 단순화 가정 및 한계</h2>
+
+  <h3>13.1 ToA 단순화</h3>
+  <p>실제 LoRa 전송에서 SF별 ToA는 페이로드 크기와 대역폭에 따라 크게 달라진다. 예시: 50 byte 페이로드, BW = 125 kHz:</p>
+  <table>
+    <tr><th>SF</th><th>인덱스 $k$</th><th>ToA (근사)</th><th>SF7 대비 배율</th></tr>
+    <tr><td>SF7</td><td>0</td><td>~41 ms</td><td>1×</td></tr>
+    <tr><td>SF8</td><td>1</td><td>~72 ms</td><td>~1.8×</td></tr>
+    <tr><td>SF9</td><td>2</td><td>~144 ms</td><td>~3.5×</td></tr>
+    <tr><td>SF10</td><td>3</td><td>~247 ms</td><td>~6×</td></tr>
+    <tr><td>SF11</td><td>4</td><td>~495 ms</td><td>~12×</td></tr>
+    <tr><td>SF12</td><td>5</td><td>~1318 ms</td><td>~32×</td></tr>
+  </table>
+  <p><strong>본 시뮬레이터의 가정:</strong> 모든 SF ($k=0,\ldots,5$)에서 전송은 동일하게 <strong>슬롯 1개</strong>를 점유한다.</p>
+  <p><strong>논문 작성 시:</strong> "슬롯 길이를 SF12 기준 최대 ToA로 설정한다"고 명시하면 된다. Limitation으로 명시 권장.</p>
+  <p><strong>영향:</strong> SF12 ($k=5$) 노드의 채널 점유 불이익이 과소평가된다. 실제 환경에서 SF12 노드는 본 시뮬레이션보다 더 불공정한 상황에 처할 가능성이 있다.</p>
+
+  <h3>13.2 기타 단순화 가정</h3>
+  <table>
+    <tr><th>가정</th><th>내용</th></tr>
+    <tr><td>섀도잉 없음</td><td>로그-정규 섀도잉 미포함. 경로손실은 결정론적</td></tr>
+    <tr><td>소규모 페이딩 선택적</td><td><code>enable_rayleigh_fading=False</code>(기본)이면 결정론적 SNR. 활성화 시 $\gamma_{\rm rf} \sim \mathrm{Exp}(1)$ 적용, <code>rayleigh_fade_margin_db</code>(기본 10 dB)로 운용 마진 확보</td></tr>
+    <tr><td>캡처 효과 없음</td><td>충돌 시 신호 강도와 무관하게 모든 패킷 실패</td></tr>
+    <tr><td>단일 게이트웨이</td><td>$g=0$ 고정. 복수 GW 및 다이버시티 수신 미지원</td></tr>
+    <tr><td>완전 직교 SF</td><td>$k$가 다르면 충돌 없음 (실제로는 near-far 간섭 가능)</td></tr>
+    <tr><td>다운링크/ACK 없음</td><td>노드는 성공 여부를 외부 신호 없이 판단 불가</td></tr>
+    <tr><td>정적 노드</td><td>이동성 없음</td></tr>
+    <tr><td>동일 송신 전력</td><td>TX power 제어 미지원 ($P_{\rm tx} = 14$ dBm 고정)</td></tr>
+  </table>
+  <hr>
+
+  <!-- ===== Section 14 ===== -->
+  <h2 id="s14">14. 시뮬레이션 파라미터 요약</h2>
+  <table>
+    <tr><th>파라미터</th><th>기호/키</th><th>기본값</th><th>설명</th></tr>
+    <tr><td>노드 수</td><td>$N$</td><td>60</td><td>단말 노드 수</td></tr>
+    <tr><td>목표 제공 부하</td><td>$G$</td><td>1.0</td><td>정규화 제공 부하</td></tr>
+    <tr><td>채널 수</td><td>$N_{\rm ch}$</td><td>3</td><td>직교 채널 수 ($c \in \{0,\ldots,N_{\rm ch}-1\}$)</td></tr>
+    <tr><td>총 슬롯 수</td><td>$T_{\rm total}$</td><td>20,000</td><td>전체 시뮬레이션 길이</td></tr>
+    <tr><td>워밍업 슬롯</td><td>$T_{\rm warm}$</td><td>5,000</td><td>측정 제외 초기 구간</td></tr>
+    <tr><td>에폭 슬롯</td><td>$T_{\rm epoch}$</td><td>500</td><td>시계열 집계 및 카운터 초기화 주기</td></tr>
+    <tr><td>거리 비율</td><td>$\rho$</td><td>0.5</td><td>링 배치 반경 비율</td></tr>
+    <tr><td>큐 모드</td><td><code>queue_mode</code></td><td><code>accumulate</code></td><td>패킷 큐 운영 방식</td></tr>
+    <tr><td>노드 배치</td><td><code>layout</code></td><td><code>random</code></td><td>노드 공간 배치 방식</td></tr>
+    <tr><td>GW 관측 모드</td><td><code>gw_obs_mode</code></td><td><code>attempt</code></td><td>GW 부하 추정 기반 패킷 범위</td></tr>
+    <tr><td>GW 윈도우</td><td>$W_{\rm gw}$</td><td>50</td><td>부하 추정 롤링 윈도우 (슬롯)</td></tr>
+    <tr><td>셀 가장자리 마진</td><td>$\delta_{\rm edge}$</td><td>2.0 dB</td><td>셀 반경 계산 여유분</td></tr>
+    <tr><td>ADR 마진</td><td>$\delta_{\rm adr}$</td><td>1.0 dB</td><td>ADR-like SF 할당 여유분</td></tr>
+    <tr><td>라디오 프로파일</td><td><code>profile_name</code></td><td><code>short</code></td><td>경로손실 파라미터 집합 ($\eta$, $\mathrm{LPL}(d_0)$, $d_0$)</td></tr>
+    <tr><td>배치 시드</td><td><code>layout_seed</code></td><td>42</td><td>모든 베이스라인 공유, 재현성 보장</td></tr>
+    <tr><td>시뮬레이션 시드</td><td><code>seed</code></td><td>베이스라인별 독립</td><td>패킷 도착·충돌 판정 RNG</td></tr>
+    <tr><td>상태 변형</td><td><code>state_variant</code></td><td><code>s2_compact</code></td><td>Q-learning 상태 공간 구성</td></tr>
+    <tr><td>보상 변형</td><td><code>reward_variant</code></td><td><code>v6_signal</code></td><td>Q-learning 보상 함수</td></tr>
+    <tr><td>Rayleigh 페이딩</td><td><code>enable_rayleigh_fading</code></td><td>False</td><td>소규모 페이딩 활성화 여부</td></tr>
+    <tr><td>페이드 마진</td><td><code>rayleigh_fade_margin_db</code> ($\Delta_{\rm fade}$)</td><td>10.0 dB</td><td>Rayleigh 페이딩 평균 SNR 오프셋 (대시보드 슬라이더 0–30 dB)</td></tr>
+    <tr><td>Dual-MAB ACB 차단 확률</td><td><code>dual_mab_b</code> ($b$)</td><td>0.3</td><td>Dual-MAB Access Class Barring 파라미터 (대시보드 슬라이더 0–1)</td></tr>
+  </table>
+
+</main>
+</div>
+</body>
+</html>

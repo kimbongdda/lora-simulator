@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/User/Desktop/**)",
+      "Bash(python lora_env/run_qlearn.py)",
+      "Bash(python -:*)",
+      "Bash(python -c \":*)",
+      "Bash(python lora_env/experiment_g_sweep.py)",
+      "Bash(python example_usage.py)",
+      "Bash(python run_per_node_analysis.py)",
+      "Bash(python run_epoch_timeseries.py)",
+      "Bash(python -c \"import streamlit\")"
+    ]
+  }
+}
