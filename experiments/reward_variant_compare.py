@@ -45,10 +45,18 @@ class RewardVariantConfig:
     gw_obs_mode: str = "attempt"
     enable_rayleigh_fading: bool = False
     rayleigh_fade_margin_db: float = 10.0
+    enable_rician_fading: bool = False
+    rician_k_factor: float = 4.0
+    rician_fade_margin_db: float = 5.0
     layout: str = "ring"
     controller_key: str = "decentralized_q_learning"
     variant_keys: tuple[str, ...] = tuple(REWARD_VARIANTS)
     state_variant: str = "s0_full"
+    psi: float = 0.0
+    E0: float = 10.0
+    W: int = 20
+    er_mode: str = "ETD"
+    mu: float = 0.5
     output_dir: str = os.path.join("outputs", "reward_variant_compare")
 
 
@@ -95,9 +103,12 @@ def run_reward_variant_compare(config: RewardVariantConfig | None = None) -> dic
             gw_obs_mode=config.gw_obs_mode,
             enable_rayleigh_fading=config.enable_rayleigh_fading,
             rayleigh_fade_margin_db=config.rayleigh_fade_margin_db,
+            enable_rician_fading=config.enable_rician_fading,
+            rician_k_factor=config.rician_k_factor,
+            rician_fade_margin_db=config.rician_fade_margin_db,
             layout=config.layout,
         )
-        controller = make_controller(config.controller_key, reward_variant=variant_key, state_variant=config.state_variant)
+        controller = make_controller(config.controller_key, reward_variant=variant_key, state_variant=config.state_variant, psi=config.psi, E0=config.E0, W=config.W, er_mode=config.er_mode, mu=config.mu)
         result = run_simulation(scenario, controller)
         if result.get("q_table_data") is not None:
             last_q_table_data = result["q_table_data"]

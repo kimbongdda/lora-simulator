@@ -9,7 +9,7 @@ arm = (SF_idx, channel_idx) 쌍 + 선택적 IDLE arm.
 
 from __future__ import annotations
 
-from env.types import ControllerAction, OUTCOME_SUCCESS
+from env.types import ControllerAction, OUTCOME_SUCCESS, OUTCOME_IDLE
 
 N_SF = 6
 
@@ -93,7 +93,7 @@ class ThompsonMabController:
         )
 
     def observe(self, node, action: ControllerAction, outcome: int, slot: int, **_) -> None:
-        if action.internal_action is None:
+        if action.internal_action is None or outcome == OUTCOME_IDLE:
             return
         arm = self._last_arm.get(node.node_id)
         if arm is None:

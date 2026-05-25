@@ -8,12 +8,14 @@ from agents.q_learning import DEFAULT_ACTION_VARIANT, REWARD_VARIANTS
 
 from .adr_like import make_adr_like_controller
 from .dual_mab import make_dual_mab_controller
+from .kaburaki import make_kaburaki_controller
 from .lora_mab import make_lora_mab_controller
 from .pure_aloha import make_pure_aloha_controller
 from .q_learning import make_decentralized_q_learning_controller
 from .retry_aware import make_retry_aware_controller
 from .phase_q_learning import make_phase_q_learning_controller
 from .thompson_mab import make_thompson_mab_controller
+from .lr_rl import make_lr_rl_controller, make_lr_rl_idle_controller
 
 
 @dataclass(frozen=True)
@@ -46,6 +48,11 @@ BASELINE_ORDER = (
     "dual_mab_no_acb",
     "decentralized_q_learning",
     "q_learning_abs",
+    "q_learning_rel_sfch",
+    "q_learning_abs_sfch",
+    "kaburaki",
+    "lr_rl",
+    "lr_rl_idle",
 )
 
 
@@ -128,6 +135,36 @@ BASELINE_SPECS = {
         description="독립 Q-테이블, 절대 SF 액션: IDLE + SF0~5 × 채널. |A|=1+6×N_ch. 상태: SF(6)×G_ch0(3)×G_ch1(3)×G_ch2(3)=162.",
         grounding="Absolute SF action variant with per-channel congestion state (s7_sf_gch) — agent sees which channels are congested.",
     ),
+    "q_learning_rel_sfch": BaselineSpec(
+        key="q_learning_rel_sfch",
+        label="Q-learning (SF-delta+CH)",
+        description="독립 Q-테이블, 상대 SF 액션(±1) × 채널. 상태: SF_delta(3)×CH(3)=9. |A|=10.",
+        grounding="Relative SF delta action with (SF_delta, channel) state (s14_sf_delta_ch) — minimal channel-aware relative action baseline.",
+    ),
+    "q_learning_abs_sfch": BaselineSpec(
+        key="q_learning_abs_sfch",
+        label="Q-learning (SF+CH)",
+        description="독립 Q-테이블, 절대 SF 액션 × 채널. 상태: SF(6)×CH(3)=18. |A|=19.",
+        grounding="Absolute SF action with (SF, channel) state (s13_sf_ch) — direct SF+channel selection without congestion signal.",
+    ),
+    "kaburaki": BaselineSpec(
+        key="kaburaki",
+        label="Kaburaki (offset Q-lrn)",
+        description="타이밍 오프셋 Q-learning. 각 노드가 J+1개 오프셋 후보 중 ε-greedy로 선택 후 해당 슬롯만큼 대기 후 고정 SF/채널로 전송.",
+        grounding="Kaburaki et al. (2021): Q-learning-based timing offset control for LoRa networks.",
+    ),
+    "lr_rl": BaselineSpec(
+        key="lr_rl",
+        label="LR-RL (V-table)",
+        description="Stateless V-table TD(0). 각 노드가 (SF, 채널) 18개 조합의 가치를 학습. 보상은 PCR·패킷 비율로 정규화. 패킷 도착 시 IDLE 없이 반드시 전송.",
+        grounding="Hong et al. (2023) IEEE IoT J.: RL-based SF allocation, (SF, ch) joint 선택으로 확장.",
+    ),
+    "lr_rl_idle": BaselineSpec(
+        key="lr_rl_idle",
+        label="LR-RL+IDLE (V-table)",
+        description="LR-RL V-table에 IDLE arm 1개 추가 (총 19 엔트리). 전송 arm이 모두 음수로 수렴할 때 자연스럽게 IDLE 선택. IDLE 업데이트: R=0, γ·max(전송 arms).",
+        grounding="LR-RL 확장: IDLE arm 추가로 고부하 환경에서 자발적 혼잡 회피 가능.",
+    ),
 }
 
 
@@ -150,7 +187,7 @@ def expand_run_specs(
 
     for baseline_key in baseline_keys:
         spec = BASELINE_SPECS[baseline_key]
-        if baseline_key in ("decentralized_q_learning", "q_learning_abs"):
+        if baseline_key in ("decentralized_q_learning", "q_learning_abs", "q_learning_rel_sfch", "q_learning_abs_sfch"):
             for variant_key in reward_variants:
                 variant_label = REWARD_VARIANTS[variant_key].get("plot_label", REWARD_VARIANTS[variant_key]["label"])
                 run_specs.append(
@@ -180,6 +217,22 @@ def make_controller(
     state_variant: str = "s0_full",
     action_variant: str = DEFAULT_ACTION_VARIANT,
     dual_mab_b: float = 0.3,
+    psi: float = 0.0,
+    E0: float = 10.0,
+    W: int = 20,
+    energy_cost: dict | None = None,
+    er_mode: str = "ETD",
+    mu: float = 0.5,
+    alpha: float = 0.1,
+    gamma_q: float = 0.9,
+    eps_min: float = 0.05,
+    eps_decay: float = 0.9995,
+    reward_params: "dict | None" = None,
+    kaburaki_J: int = 3,
+    kaburaki_D_max: int = 64,
+    kaburaki_alpha: float = 0.3,
+    kaburaki_gamma: float = 0.95,
+    kaburaki_eps_min: float = 0.05,
 ):
     """기준선 키에 맞는 컨트롤러 인스턴스를 만든다."""
     if baseline_key == "pure_aloha":
@@ -198,14 +251,21 @@ def make_controller(
         return make_lora_mab_controller(eta=0.1, with_idle=True, fail_reward=-1.0)
     if baseline_key == "decentralized_q_learning":
         return make_decentralized_q_learning_controller(
-            alpha=0.1,
-            gamma_q=0.9,
+            alpha=alpha,
+            gamma_q=gamma_q,
             epsilon=1.0,
-            eps_min=0.05,
-            eps_decay=0.9995,
+            eps_min=eps_min,
+            eps_decay=eps_decay,
             reward_variant=reward_variant,
+            reward_params=reward_params,
             state_variant=state_variant,
             action_variant=action_variant,
+            psi=psi,
+            E0=E0,
+            W=W,
+            energy_cost=energy_cost,
+            er_mode=er_mode,
+            mu=mu,
         )
     if baseline_key == "phase_q_learning":
         return make_phase_q_learning_controller(
@@ -219,6 +279,15 @@ def make_controller(
         return make_dual_mab_controller(b=dual_mab_b)
     if baseline_key == "dual_mab_no_acb":
         return make_dual_mab_controller(b=0.0)
+    if baseline_key == "kaburaki":
+        return make_kaburaki_controller(
+            J=kaburaki_J, D_max=kaburaki_D_max,
+            alpha=kaburaki_alpha, gamma=kaburaki_gamma, eps_min=kaburaki_eps_min,
+        )
+    if baseline_key == "lr_rl":
+        return make_lr_rl_controller()
+    if baseline_key == "lr_rl_idle":
+        return make_lr_rl_idle_controller()
     if baseline_key == "q_learning_abs":
         return make_decentralized_q_learning_controller(
             alpha=0.1,
@@ -229,5 +298,47 @@ def make_controller(
             reward_variant=reward_variant,
             state_variant="s7_sf_gch",   # SF(6) × 채널별 G bin — 채널 혼잡도 직접 관측
             action_variant="absolute",
+            psi=psi,
+            E0=E0,
+            W=W,
+            energy_cost=energy_cost,
+            er_mode=er_mode,
+            mu=mu,
+        )
+    if baseline_key == "q_learning_rel_sfch":
+        return make_decentralized_q_learning_controller(
+            alpha=alpha,
+            gamma_q=gamma_q,
+            epsilon=1.0,
+            eps_min=eps_min,
+            eps_decay=eps_decay,
+            reward_variant=reward_variant,
+            state_variant="s14_sf_delta_ch",  # SF_delta(3) × CH(3) = 9 states
+            action_variant="relative",
+            psi=psi,
+            E0=E0,
+            W=W,
+            energy_cost=energy_cost,
+            er_mode=er_mode,
+            mu=mu,
+            reward_params=reward_params,
+        )
+    if baseline_key == "q_learning_abs_sfch":
+        return make_decentralized_q_learning_controller(
+            alpha=alpha,
+            gamma_q=gamma_q,
+            epsilon=1.0,
+            eps_min=eps_min,
+            eps_decay=eps_decay,
+            reward_variant=reward_variant,
+            state_variant="s13_sf_ch",    # SF(6) × CH(3) = 18 states
+            action_variant="absolute",
+            psi=psi,
+            E0=E0,
+            W=W,
+            energy_cost=energy_cost,
+            er_mode=er_mode,
+            mu=mu,
+            reward_params=reward_params,
         )
     raise KeyError(f"Unknown baseline key: {baseline_key}")

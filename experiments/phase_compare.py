@@ -54,9 +54,12 @@ class PhaseCompareConfig:
     gw_obs_mode: str = "attempt"
     enable_rayleigh_fading: bool = False
     rayleigh_fade_margin_db: float = 10.0
+    enable_rician_fading: bool = False
+    rician_k_factor: float = 4.0
+    rician_fade_margin_db: float = 5.0
     gw_thresholds: tuple[float, ...] = (0.7, 1.3)
     layout: str = "ring"
-    reward_variant: str = "v10_phase_idle"   # IDLE 보상 양수, fail 완화 — 페이즈 학습 최적화
+    reward_variant: str = "congestion"   # IDLE 보상 양수, fail 완화 — 페이즈 학습 최적화
     # 비교할 frame_size 목록.
     # 1 = 페이즈 비활성 baseline, N = n_nodes 와 동일하게 두면 이상적 분리.
     frame_sizes: tuple[int, ...] = (1, 8, 18, 30, 60)
@@ -99,6 +102,9 @@ def run_phase_compare(config: PhaseCompareConfig | None = None) -> dict:
             gw_obs_mode=config.gw_obs_mode,
             enable_rayleigh_fading=config.enable_rayleigh_fading,
             rayleigh_fade_margin_db=config.rayleigh_fade_margin_db,
+            enable_rician_fading=config.enable_rician_fading,
+            rician_k_factor=config.rician_k_factor,
+            rician_fade_margin_db=config.rician_fade_margin_db,
             gw_thresholds=config.gw_thresholds,
             layout=config.layout,
         )

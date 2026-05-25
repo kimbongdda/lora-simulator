@@ -30,6 +30,7 @@ encode_state()는 선택된 특징만 순서대로 묶어 Q-table 키를 만든�
 
 from __future__ import annotations
 
+import collections
 import math
 import random
 from collections import defaultdict
@@ -44,6 +45,26 @@ ACTION_IDLE = 0
 N_SF_CHANGES = 3
 N_SF = 6
 CHANNEL_SWITCH_PENALTY = 0.05
+ENERGY_COST_DEFAULT: dict[int, float] = {0: 1.0, 1: 2.0, 2: 3.0, 3: 4.0, 4: 5.0, 5: 6.0}
+N_ENERGY_BINS = 3
+
+
+def _energy_bin(E_k: float, E0: float) -> int:
+    """E_k를 3단계로 이산화한다. 0=여유(E0 절반 미만), 1=주의, 2=초과(E0 이상)."""
+    if E_k < E0 * 0.5:
+        return 0
+    if E_k < E0:
+        return 1
+    return 2
+
+
+def _energy_bin_arr(E_k_arr: np.ndarray, E0: float) -> np.ndarray:
+    """_energy_bin의 배치 경로용 벡터화 버전."""
+    eb = np.zeros(len(E_k_arr), dtype=np.int32)
+    eb[E_k_arr >= E0 * 0.5] = 1
+    eb[E_k_arr >= E0] = 2
+    return eb
+
 
 ACTION_VARIANTS: dict[str, dict] = {
     "relative": {
@@ -391,13 +412,86 @@ STATE_VARIANTS: dict[str, dict] = {
         "gateway_g_bins":  False,
         "failure_level":   False,
         "gateway_g_max":   False,
+        "energy_bin":      False,
+    },
+    "s18_sf_delta_eb": {
+        "label": "s18 SF방향+에너지빈 (SF_delta+Eb)",
+        "description": (
+            "직전 SF 변화 방향(down/stay/up) + 에너지 빈 3단계. "
+            "SF_delta(3)×Eb(3) = 9 상태. 절대 SF 없이 변화 경향과 에너지 상태만 사용. "
+            "ER-Q와 함께 가장 작은 에너지 인식 상태 공간. 배치 경로 지원."
+        ),
+        "has_packet":      False,
+        "last_result_bin": False,
+        "retry_bin":       False,
+        "sf_idx":          False,
+        "sf_delta":        True,
+        "snr_margin_bin":  False,
+        "channel_idx":     False,
+        "gateway_g_bins":  False,
+        "failure_level":   False,
+        "gateway_g_max":   False,
+        "energy_bin":      True,
+    },
+    "s17_sf_eb": {
+        "label": "s17 SF+에너지빈 (SF+Eb)",
+        "description": (
+            "SF 인덱스 + 에너지 빈 3단계만 사용. Gmax·실패이력 없음. "
+            "SF(6)×Eb(3) = 18 상태. ER-Q와 함께 에너지 비용의 영향만 분리해 비교 가능. 배치 경로 지원."
+        ),
+        "has_packet":      False,
+        "last_result_bin": False,
+        "retry_bin":       False,
+        "sf_idx":          True,
+        "snr_margin_bin":  False,
+        "channel_idx":     False,
+        "gateway_g_bins":  False,
+        "failure_level":   False,
+        "gateway_g_max":   False,
+        "energy_bin":      True,
+    },
+    "s15_sf_gmax_eb": {
+        "label": "s15 SF+Gmax+에너지빈",
+        "description": (
+            "s4_no_fl(SF×Gmax)에 에너지 빈 3단계 추가. "
+            "SF(6)×Gmax(3)×Eb(3) = 54 상태. "
+            "ER-Q와 함께 사용 시 에너지 수준별 별도 정책 학습 가능. 배치 경로 지원."
+        ),
+        "has_packet":      False,
+        "last_result_bin": False,
+        "retry_bin":       False,
+        "sf_idx":          True,
+        "snr_margin_bin":  False,
+        "channel_idx":     False,
+        "gateway_g_bins":  False,
+        "failure_level":   False,
+        "gateway_g_max":   True,
+        "energy_bin":      True,
+    },
+    "s16_sf_fl_gmax_eb": {
+        "label": "s16 SF+FL+Gmax+에너지빈",
+        "description": (
+            "s2_compact(SF×FL×Gmax)에 에너지 빈 3단계 추가. "
+            "SF(6)×FL(4)×Gmax(3)×Eb(3) = 216 상태. "
+            "실패 이력·혼잡도·에너지 수준을 모두 포함하는 풍부한 상태. 배치 경로 지원."
+        ),
+        "has_packet":      False,
+        "last_result_bin": False,
+        "retry_bin":       False,
+        "sf_idx":          True,
+        "snr_margin_bin":  False,
+        "channel_idx":     False,
+        "gateway_g_bins":  False,
+        "failure_level":   True,
+        "gateway_g_max":   True,
+        "energy_bin":      True,
     },
 }
 
 DEFAULT_STATE_VARIANT = "s4_no_fl"
 
 
-def encode_state(node, gateway_g_bins: tuple[int, ...], state_variant: str = DEFAULT_STATE_VARIANT, sf_delta: int = 0) -> tuple[int, ...]:
+def encode_state(node, gateway_g_bins: tuple[int, ...], state_variant: str = DEFAULT_STATE_VARIANT, sf_delta: int = 0, E_k: float = 0.0, E0: float = 10.0) -> tuple[int, ...]:
     """큐 테이블 조회용 상태 키를 만든다.
 
     노드의 현재 패킷 여부, 직전 결과, retry 횟수, SF, 채널,
@@ -427,18 +521,19 @@ def encode_state(node, gateway_g_bins: tuple[int, ...], state_variant: str = DEF
         parts.append(_failure_level(node.last_outcome, node.retry_count))
     if cfg["gateway_g_max"]:
         parts.append(max(gateway_g_bins) if gateway_g_bins else 1)
+    if cfg.get("energy_bin"):
+        parts.append(_energy_bin(E_k, E0))
 
     return tuple(parts)
 
 
 REWARD_VARIANTS: dict[str, dict] = {
-    "v6_signal": {
-        "label": "v6 기준선",
-        "plot_label": "v6 Signal",
+    "base": {
+        "label": "Base",
+        "plot_label": "Base",
         "description": (
-            "s2_compact 상태와 함께 사용 권장. "
-            "retry_coef=0: failure_level이 상태에 있으므로 중복 페널티 불필요. "
-            "switch_pen=0: channel_idx가 상태에 없으므로 불필요."
+            "기준선. 성공=+1, 실패=-1, IDLE(패킷 있음)=-0.02. "
+            "단순 대칭 보상으로 ASR 최대화에 집중."
         ),
         "type": "standard",
         "success": 1.0,
@@ -448,32 +543,13 @@ REWARD_VARIANTS: dict[str, dict] = {
         "retry_coef": 0.0,
         "switch_pen": 0.0,
     },
-    "v7_asymmetric": {
-        "label": "v7 균형 최적화",
-        "plot_label": "v7 Balanced",
+    "fair": {
+        "label": "Fair",
+        "plot_label": "Fair",
         "description": (
-            "ASR·처리량·공정성 균형 최적화. "
-            "성공 보상 = 0.5 + 0.5/(1+norm) → [0.5, 1.0]. "
-            "기저값(0.5)으로 처리량 인센티브 유지, 공정성 항(0.5/(1+norm))으로 균등화. "
-            "fail=-1.0(ASR 보호), idle=-0.02(v6 동일)."
-        ),
-        "type": "composite",
-        "success_base": 0.5,
-        "success_fair": 0.5,
-        "fail": -1.0,
-        "idle_pkt": -0.02,
-        "idle_no_pkt": 0.0,
-        "retry_coef": 0.0,
-        "switch_pen": 0.0,
-    },
-    "v8_fairness": {
-        "label": "v8 공정성 강화",
-        "plot_label": "v8 Fairness+",
-        "description": (
-            "공정성 우선 다목적 최적화. "
-            "성공 보상 = 0.3 + 0.7/(1+norm) → [0.3, 1.0]. "
-            "공정성 항 비중(0.7)이 가장 높아 성공 많은 노드 보상을 강하게 억제. "
-            "fail=-1.0, idle=-0.02."
+            "공정성 강화. 성공 보상 = 0.3 + 0.7/(1+norm) → [0.3, 1.0]. "
+            "이미 성공이 많은 노드일수록 보상을 줄여 노드 간 균등화. "
+            "fail=-1.0으로 ASR 보호 유지."
         ),
         "type": "composite",
         "success_base": 0.3,
@@ -484,14 +560,13 @@ REWARD_VARIANTS: dict[str, dict] = {
         "retry_coef": 0.0,
         "switch_pen": 0.0,
     },
-    "v9_log_thr": {
-        "label": "v9 탐색 허용",
-        "plot_label": "v9 Explore",
+    "explore": {
+        "label": "Explore",
+        "plot_label": "Explore",
         "description": (
-            "탐색 허용 다목적 최적화. "
-            "성공 보상 = 0.6 + 0.4/(1+norm) → [0.6, 1.0]. "
-            "fail=-0.7로 충돌 페널티를 완화해 더 넓은 SF/채널 탐색 허용. "
-            "idle=-0.02, 공정성 항 포함."
+            "탐색 허용. 성공 보상 = 0.6 + 0.4/(1+norm) → [0.6, 1.0]. "
+            "fail=-0.7로 충돌 페널티를 완화해 다양한 SF·채널 탐색 유도. "
+            "공정성 항 포함."
         ),
         "type": "composite",
         "success_base": 0.6,
@@ -502,17 +577,13 @@ REWARD_VARIANTS: dict[str, dict] = {
         "retry_coef": 0.0,
         "switch_pen": 0.0,
     },
-    "v10_phase_idle": {
-        "label": "v10 페이즈/IDLE 특화",
-        "plot_label": "v10 Phase+Idle",
+    "congestion": {
+        "label": "Congestion",
+        "plot_label": "Congestion",
         "description": (
-            "Phase Learning 및 전략적 IDLE 활용에 최적화. "
-            "idle_pkt=+0.10: 패킷이 있어도 IDLE을 양수 보상으로 장려 → "
-            "노드가 혼잡 슬롯 회피를 학습. "
-            "fail=-0.7: 페널티 완화로 탐색 유지 (충돌을 너무 두려워하지 않음). "
-            "success=1.0 고정. "
-            "실험 결과: phase F=40 기준 v6 대비 fairness +0.05~0.10, "
-            "throughput +1.0~1.5 향상. ASR은 소폭 하락(선택적 전송 증가 때문)."
+            "혼잡 회피. idle_pkt=+0.10으로 패킷이 있어도 IDLE을 양수 보상으로 장려 → "
+            "노드가 혼잡 슬롯을 스스로 회피하도록 학습. "
+            "fail=-0.7: 페널티 완화로 탐색 유지. Phase Learning과 함께 사용 권장."
         ),
         "type": "standard",
         "success": 1.0,
@@ -524,7 +595,7 @@ REWARD_VARIANTS: dict[str, dict] = {
     },
 }
 
-DEFAULT_REWARD_VARIANT = "v6_signal"
+DEFAULT_REWARD_VARIANT = "base"
 
 
 def compute_reward(
@@ -535,32 +606,27 @@ def compute_reward(
     variant: str = DEFAULT_REWARD_VARIANT,
     node_success_count: int = 0,
     mean_success_count: float = 1.0,
+    reward_params: dict | None = None,
 ) -> float:
     """슬롯 결과에 대한 스칼라 보상을 계산한다.
 
-    노드는 충돌과 링크 실패를 구분하지 못하므로 둘 다 실패로 취급한다.
-
-    node_success_count: 이 노드의 에폭 내 성공 횟수 (v8, v9 variant에서 사용).
-    mean_success_count: 전체 노드 평균 에폭 성공 횟수. v8/v9 정규화에 사용.
+    reward_params가 주어지면 variant 조회를 건너뛰고 해당 dict을 직접 사용한다.
+    parametric reward search에서 Optuna가 계수를 직접 제어할 때 사용.
     """
-    reward_cfg = REWARD_VARIANTS.get(variant, REWARD_VARIANTS[DEFAULT_REWARD_VARIANT])
+    reward_cfg = reward_params if reward_params is not None else \
+        REWARD_VARIANTS.get(variant, REWARD_VARIANTS[DEFAULT_REWARD_VARIANT])
     retry_penalty = float(reward_cfg["retry_coef"]) * float(retry_count_before)
     switch_penalty = float(reward_cfg["switch_pen"]) if channel_changed else 0.0
     rtype = reward_cfg.get("type", "standard")
 
     if outcome == OUTCOME_SUCCESS:
-        if rtype in ("fairness", "log_thr", "composite"):
+        if rtype == "composite":
             # 전체 노드 평균 대비 정규화: 보상이 시뮬레이션 길이와 무관하게 안정 유지
             mean_n = max(1.0, float(mean_success_count))
             norm = float(node_success_count) / mean_n
-            if rtype == "fairness":
-                r = 1.0 / (1.0 + norm)
-            elif rtype == "log_thr":
-                r = math.log(norm + 2.0) - math.log(norm + 1.0)
-            else:  # composite: base + fair/(1+norm)
-                base = float(reward_cfg.get("success_base", 0.5))
-                fair = float(reward_cfg.get("success_fair", 0.5))
-                r = base + fair / (1.0 + norm)
+            base = float(reward_cfg.get("success_base", 0.5))
+            fair = float(reward_cfg.get("success_fair", 0.5))
+            r = base + fair / (1.0 + norm)
         else:
             r = float(reward_cfg["success"])
         return r - switch_penalty
@@ -592,6 +658,13 @@ class _QLearningControllerBase:
         reward_variant: str = DEFAULT_REWARD_VARIANT,
         state_variant: str = DEFAULT_STATE_VARIANT,
         action_variant: str = DEFAULT_ACTION_VARIANT,
+        psi: float = 0.0,
+        E0: float = 10.0,
+        W: int = 20,
+        energy_cost: dict | None = None,
+        er_mode: str = "ETD",
+        mu: float = 0.5,
+        reward_params: dict | None = None,
     ) -> None:
         self.alpha = alpha
         self.gamma_q = gamma_q
@@ -599,8 +672,15 @@ class _QLearningControllerBase:
         self.eps_min = eps_min
         self.eps_decay = eps_decay
         self.reward_variant = reward_variant
+        self.reward_params = reward_params
         self.state_variant = state_variant
         self.action_variant = action_variant
+        self.psi = float(psi)
+        self.E0 = float(E0)
+        self.W = int(W)
+        self.er_mode = er_mode if er_mode in ("ETD", "EM") else "ETD"
+        self.mu = float(mu)
+        self._energy_cost: dict[int, float] = energy_cost if energy_cost is not None else dict(ENERGY_COST_DEFAULT)
         self._rng = random.Random()
 
         self._n_channels = 3
@@ -612,6 +692,9 @@ class _QLearningControllerBase:
         self._node_epsilons: dict[int, float] = {}
         self._node_ids: list[int] = []
         self._gateway_g_bins: tuple[int, ...] = (1, 1, 1)
+        # 표준 경로 에너지 슬라이딩 윈도우
+        self._energy_history: dict[int, collections.deque] = {}
+        self._E_k: dict[int, float] = {}
 
     def begin_run(self, nodes, config, rng) -> None:
         self._rng = rng
@@ -620,11 +703,20 @@ class _QLearningControllerBase:
         self._gateway_g_bins = tuple(1 for _ in range(config.n_channels))
         self._node_ids = [node.node_id for node in nodes]
         self._epoch_slots = config.epoch_slots
-        # v8/v9 표준 경로 전용 에폭 내 성공 카운터
+        # composite 보상 전용 에폭 내 카운터 (성공 횟수 / 전송 시도 횟수)
         self._std_success_count: dict[int, int] = {nid: 0 for nid in self._node_ids}
+        self._std_attempt_count: dict[int, int] = {nid: 0 for nid in self._node_ids}
 
         # s8_sf_delta 표준 경로: 노드별 직전 SF delta 추적 (-1/0/+1)
         self._sf_delta_map: dict[int, int] = {nid: 0 for nid in self._node_ids}
+
+        # 표준 경로 에너지 슬라이딩 윈도우 초기화
+        _sv_cfg = STATE_VARIANTS.get(self.state_variant, {})
+        self._track_energy = self.psi > 0.0 or bool(_sv_cfg.get("energy_bin", False))
+        self._energy_history = {
+            nid: collections.deque(maxlen=self.W) for nid in self._node_ids
+        }
+        self._E_k = {nid: 0.0 for nid in self._node_ids}
 
         if self.shared_table:
             self._shared_q_table = _new_q_table(self._n_actions)
@@ -651,6 +743,28 @@ class _QLearningControllerBase:
             return self._shared_epsilon
         return self._node_epsilons[node_id]
 
+    def _action_to_sf_idx(self, action: int, current_sf_idx: int) -> int:
+        """액션 ID를 실제 SF 인덱스(0~5)로 변환한다. IDLE이면 current_sf_idx 반환."""
+        if action == ACTION_IDLE:
+            return current_sf_idx
+        if self.action_variant == "absolute":
+            _, abs_sf, _ = decode_action_absolute(action, self._n_channels)
+            return abs_sf
+        _, sf_delta, _ = decode_action(action, self._n_channels)
+        return clamp_sf_index(current_sf_idx + sf_delta)
+
+    def _update_energy_std(self, node_id: int, transmit: bool, sf_idx_used: int) -> None:
+        """표준 경로 전용: 슬라이딩 윈도우 에너지 합계를 업데이트한다.
+        IDLE 슬롯은 cost=0으로 기록해 E_k가 자연히 감소하도록 한다."""
+        if not getattr(self, '_track_energy', False):
+            return
+        cost = self._energy_cost.get(sf_idx_used, 0.0) if transmit else 0.0
+        hist = self._energy_history[node_id]
+        if len(hist) == self.W:
+            self._E_k[node_id] -= hist[0]
+        hist.append(cost)
+        self._E_k[node_id] += cost
+
     def choose_action(self, node, slot: int, gateway_info: dict | None = None) -> ControllerAction:
         if gateway_info is not None:
             self._gateway_g_bins = tuple(gateway_info.get("per_channel_g_bin", self._gateway_g_bins))
@@ -658,12 +772,28 @@ class _QLearningControllerBase:
         q_table = self._get_q_table(node.node_id)
         epsilon = self._get_epsilon(node.node_id)
         sf_delta_prev = self._sf_delta_map.get(node.node_id, 0)
-        state = encode_state(node, self._gateway_g_bins, self.state_variant, sf_delta=sf_delta_prev)
+        E_k = self._E_k.get(node.node_id, 0.0)
+        state = encode_state(node, self._gateway_g_bins, self.state_variant, sf_delta=sf_delta_prev, E_k=E_k, E0=self.E0)
 
         if self._rng.random() < epsilon:
             internal_action = self._rng.randint(0, self._n_actions - 1)
         else:
-            internal_action = int(np.argmax(q_table[state]))
+            if self.psi > 0.0:
+                E_k = self._E_k.get(node.node_id, 0.0)
+                q_arr = q_table[state].copy()
+                for a in range(self._n_actions):
+                    if a == ACTION_IDLE:
+                        continue  # IDLE: 에너지 소비 없음 → 패널티 없음
+                    sf_a = self._action_to_sf_idx(a, node.sf_idx)
+                    e_a = self._energy_cost.get(sf_a, 0.0)
+                    if self.er_mode == "EM":
+                        theta_a = self.mu * E_k + (1.0 - self.mu) * e_a
+                    else:  # ETD
+                        theta_a = E_k + e_a
+                    q_arr[a] -= self.psi * max(0.0, theta_a - self.E0)
+                internal_action = int(np.argmax(q_arr))
+            else:
+                internal_action = int(np.argmax(q_table[state]))
 
         if self.action_variant == "absolute":
             transmit, abs_sf, channel_idx = decode_action_absolute(internal_action, self._n_channels)
@@ -699,7 +829,8 @@ class _QLearningControllerBase:
         channel_changed = action.transmit and action.channel_idx != action.prev_channel_idx
         nid = node.node_id
         node_cnt = self._std_success_count.get(nid, 0)
-        mean_cnt = (sum(self._std_success_count.values()) / max(1, len(self._std_success_count)))
+        # 정규화 기준: 노드 자신의 에폭 내 전송 시도 횟수 (전역 평균 불필요)
+        own_attempts = float(max(1, self._std_attempt_count.get(nid, 0)))
         reward = compute_reward(
             outcome=outcome,
             retry_count_before=action.retry_count_before,
@@ -707,12 +838,22 @@ class _QLearningControllerBase:
             has_packet=node.has_packet,
             variant=self.reward_variant,
             node_success_count=node_cnt,
-            mean_success_count=mean_cnt,
+            mean_success_count=own_attempts,
+            reward_params=self.reward_params,
         )
+        if action.transmit:
+            self._std_attempt_count[nid] = self._std_attempt_count.get(nid, 0) + 1
         if outcome == OUTCOME_SUCCESS:
             self._std_success_count[nid] = node_cnt + 1
+
+        # 에너지 이력 업데이트 — next_state 인코딩 전에 먼저 수행
+        # (energy_bin 상태 변형: 다음 상태에 갱신된 E_k를 반영해야 올바른 Bellman 타겟)
+        self._update_energy_std(node.node_id, action.transmit, node.sf_idx)
+        E_k_next = self._E_k.get(node.node_id, 0.0)
+
         next_state = encode_state(node, self._gateway_g_bins, self.state_variant,
-                                   sf_delta=self._sf_delta_map.get(node.node_id, 0))
+                                   sf_delta=self._sf_delta_map.get(node.node_id, 0),
+                                   E_k=E_k_next, E0=self.E0)
 
         q_table = self._get_q_table(node.node_id)
         current_q = q_table[state][internal_action]
@@ -726,6 +867,7 @@ class _QLearningControllerBase:
         if rtype in ("fairness", "log_thr", "composite") and (slot + 1) % self._epoch_slots == 0:
             for nid in self._node_ids:
                 self._std_success_count[nid] = 0
+                self._std_attempt_count[nid] = 0
 
         if self.shared_table:
             self._shared_epsilon = max(self.eps_min, self._shared_epsilon * self.eps_decay)
@@ -821,6 +963,7 @@ class DecentralizedQLearningController(_QLearningControllerBase):
         "s2_compact", "s3_no_sf", "s4_no_fl", "s5_no_gmax", "s6_sf_only", "s7_sf_gch",
         "s8_sf_delta", "s9_sf_delta_gmax", "s10_sf_delta_fl", "s11_sf_delta_only",
         "s12_sf_ch_gmax", "s13_sf_ch", "s14_sf_delta_ch",
+        "s15_sf_gmax_eb", "s16_sf_fl_gmax_eb", "s17_sf_eb", "s18_sf_delta_eb",
     })
 
     @classmethod
@@ -839,6 +982,10 @@ class DecentralizedQLearningController(_QLearningControllerBase):
         if variant == "s12_sf_ch_gmax":     return cls._S2_N_SF * n_channels * n_bins  # SF(6)×CH×Gmax
         if variant == "s13_sf_ch":          return cls._S2_N_SF * n_channels            # SF(6)×CH
         if variant == "s14_sf_delta_ch":    return 3 * n_channels                       # SF_delta(3)×CH
+        if variant == "s18_sf_delta_eb":     return 3 * N_ENERGY_BINS                                   # SF_delta(3)×Eb(3) = 9
+        if variant == "s17_sf_eb":           return cls._S2_N_SF * N_ENERGY_BINS                        # SF×Eb = 18
+        if variant == "s15_sf_gmax_eb":     return cls._S2_N_SF * n_bins * N_ENERGY_BINS               # SF×Gmax×Eb = 54
+        if variant == "s16_sf_fl_gmax_eb":  return cls._S2_N_SF * cls._S2_N_FL * n_bins * N_ENERGY_BINS  # SF×FL×Gmax×Eb = 216
         return 0
 
     @property
@@ -856,11 +1003,20 @@ class DecentralizedQLearningController(_QLearningControllerBase):
             n_states = self._compute_n_states(self.state_variant, self._n_bins, self._n_channels)
             self._q_dense = np.zeros((N, n_states, self._n_actions), dtype=np.float64)
             self._epsilon_arr = np.full(N, self.initial_epsilon, dtype=np.float64)
-            self._success_count_arr = np.zeros(N, dtype=np.int64)  # v8/v9 보상용 에폭 내 성공 수
+            self._success_count_arr = np.zeros(N, dtype=np.int64)  # composite 보상용 에폭 내 성공 수
+            self._attempt_count_arr = np.zeros(N, dtype=np.int64)  # composite 보상용 에폭 내 전송 시도 수
             self._sf_delta_arr = np.zeros(N, dtype=np.int32)       # s8_sf_delta 배치 경로용
             # 배치 경로 전용 numpy RNG (컨트롤러 rng와 독립)
             np_seed = rng.randint(0, 2 ** 31)
             self._np_rng = np.random.RandomState(np_seed)
+            # 에너지 규제 배치 경로: 링 버퍼 (psi>0 또는 energy_bin 상태 변형 시 초기화)
+            _sv_cfg = STATE_VARIANTS.get(self.state_variant, {})
+            self._track_energy = self.psi > 0.0 or bool(_sv_cfg.get("energy_bin", False))
+            if self._track_energy:
+                self._er_buf = np.zeros((N, self.W), dtype=np.float64)
+                self._er_ptr = np.zeros(N, dtype=np.int32)
+                self._er_fill = np.zeros(N, dtype=np.int32)
+                self._E_k_arr = np.zeros(N, dtype=np.float64)
 
     # ------------------------------------------------------------------
     # 배치 경로 전용 메서드 (s2_compact + dense Q-table)
@@ -881,7 +1037,8 @@ class DecentralizedQLearningController(_QLearningControllerBase):
                       retry_arr: np.ndarray, g_max: int,
                       gateway_g_bins: tuple = (),
                       sf_delta_arr: np.ndarray | None = None,
-                      ch_arr: np.ndarray | None = None) -> np.ndarray:
+                      ch_arr: np.ndarray | None = None,
+                      E_k_arr: np.ndarray | None = None) -> np.ndarray:
         """s2* 계열 상태를 variant에 따라 플랫 인덱스로 일괄 인코딩한다.
 
         s2_compact    : sf * 12 + fl * 3 + gm            (72 states)
@@ -916,6 +1073,17 @@ class DecentralizedQLearningController(_QLearningControllerBase):
             ch = ch_arr if ch_arr is not None else np.zeros_like(sf_arr)
             sd = (sf_delta_arr if sf_delta_arr is not None else np.zeros_like(sf_arr)) + 1
             idx = sd * self._n_channels + ch
+        elif v in ("s15_sf_gmax_eb", "s16_sf_fl_gmax_eb", "s17_sf_eb", "s18_sf_delta_eb"):
+            eb = _energy_bin_arr(E_k_arr, self.E0) if E_k_arr is not None else np.zeros(len(sf_arr), dtype=np.int32)
+            if v == "s18_sf_delta_eb":
+                sd = (sf_delta_arr if sf_delta_arr is not None else np.zeros(len(sf_arr), dtype=np.int32)) + 1  # -1→0, 0→1, +1→2
+                idx = sd * N_ENERGY_BINS + eb
+            elif v == "s17_sf_eb":
+                idx = sf_arr * N_ENERGY_BINS + eb
+            elif v == "s15_sf_gmax_eb":
+                idx = sf_arr * (nb * N_ENERGY_BINS) + g_max * N_ENERGY_BINS + eb
+            else:  # s16_sf_fl_gmax_eb
+                idx = sf_arr * (self._S2_N_FL * nb * N_ENERGY_BINS) + fl * (nb * N_ENERGY_BINS) + g_max * N_ENERGY_BINS + eb
         elif v in ("s8_sf_delta", "s9_sf_delta_gmax", "s10_sf_delta_fl", "s11_sf_delta_only"):
             sd = (sf_delta_arr if sf_delta_arr is not None else np.zeros_like(sf_arr)) + 1  # -1→0, 0→1, +1→2
             if v == "s8_sf_delta":
@@ -960,14 +1128,46 @@ class DecentralizedQLearningController(_QLearningControllerBase):
             empty_i = np.array([], dtype=np.int32)
             return empty_i, empty_i, np.array([], dtype=bool), empty_i, empty_i
 
+        _E_k_active = self._E_k_arr[active_ids] if hasattr(self, '_E_k_arr') else None
         state_idx = self._encode_batch(
             sf_arr[active_ids], last_outcome_arr[active_ids], retry_arr[active_ids], g_max, gateway_g_bins,
             sf_delta_arr=self._sf_delta_arr[active_ids] if hasattr(self, '_sf_delta_arr') else None,
             ch_arr=ch_arr[active_ids],
+            E_k_arr=_E_k_active,
         )
 
         q_vals = self._q_dense[active_ids, state_idx]           # (n_active, A)
-        greedy = q_vals.argmax(axis=1).astype(np.int32)
+
+        if self.psi > 0.0 and hasattr(self, '_E_k_arr'):
+            E_k = self._E_k_arr[active_ids]                     # (n_active,)
+            q_reg = q_vals.copy()
+            if self.action_variant == "absolute":
+                for a in range(self._n_actions):
+                    if a == ACTION_IDLE:
+                        continue  # IDLE: 에너지 소비 없음 → 패널티 없음
+                    e_a = self._energy_cost.get((a - 1) // self._n_channels, 0.0)
+                    if self.er_mode == "EM":
+                        theta = self.mu * E_k + (1.0 - self.mu) * e_a
+                    else:  # ETD
+                        theta = E_k + e_a
+                    q_reg[:, a] -= self.psi * np.maximum(0.0, theta - self.E0)
+            else:
+                cur_sf = sf_arr[active_ids]
+                for a in range(self._n_actions):
+                    if a == ACTION_IDLE:
+                        continue  # IDLE: 에너지 소비 없음 → 패널티 없음
+                    sf_change_idx = (a - 1) // self._n_channels
+                    delta = (0, 1, -1)[sf_change_idx]
+                    sf_a_arr = np.clip(cur_sf + delta, 0, 5).astype(np.int32)
+                    e_a_arr = np.array([self._energy_cost.get(int(s), 0.0) for s in sf_a_arr], dtype=np.float64)
+                    if self.er_mode == "EM":
+                        theta_arr = self.mu * E_k + (1.0 - self.mu) * e_a_arr
+                    else:  # ETD
+                        theta_arr = E_k + e_a_arr
+                    q_reg[:, a] -= self.psi * np.maximum(0.0, theta_arr - self.E0)
+            greedy = q_reg.argmax(axis=1).astype(np.int32)
+        else:
+            greedy = q_vals.argmax(axis=1).astype(np.int32)
 
         eps = self._epsilon_arr[active_ids]
         explore = self._np_rng.random(n_active) < eps
@@ -1001,6 +1201,29 @@ class DecentralizedQLearningController(_QLearningControllerBase):
 
         return state_idx, int_actions, transmit, new_sf, new_ch
 
+    def _update_energy_batch(
+        self,
+        node_ids: np.ndarray,
+        int_actions: np.ndarray,
+        sf_arr: np.ndarray,
+    ) -> None:
+        """배치 경로 전용: 링 버퍼 방식 슬라이딩 윈도우 에너지 합계 업데이트.
+        IDLE 슬롯은 cost=0으로 기록해 E_k가 자연히 감소하도록 한다."""
+        if self.psi <= 0.0 or not hasattr(self, '_er_buf'):
+            return
+        for i, nid in enumerate(node_ids):
+            nid = int(nid)
+            transmit = int(int_actions[i]) != ACTION_IDLE
+            cost = self._energy_cost.get(int(sf_arr[nid]), 0.0) if transmit else 0.0
+            ptr = int(self._er_ptr[nid])
+            if self._er_fill[nid] >= self.W:
+                self._E_k_arr[nid] -= self._er_buf[nid, ptr]
+            self._er_buf[nid, ptr] = cost
+            self._E_k_arr[nid] += cost
+            self._er_ptr[nid] = (ptr + 1) % self.W
+            if self._er_fill[nid] < self.W:
+                self._er_fill[nid] += 1
+
     def observe_batch(
         self,
         active_ids: np.ndarray,
@@ -1031,11 +1254,11 @@ class DecentralizedQLearningController(_QLearningControllerBase):
 
         # 성공 보상 계산 (type에 따라 분기)
         if rtype in ("fairness", "log_thr", "composite"):
-            # 전체 노드 평균 대비 정규화: 보상이 시뮬레이션 길이와 무관하게 안정 유지
-            mean_n = max(1.0, float(self._success_count_arr.mean()))
+            # 노드 자신의 에폭 내 전송 시도 횟수로 정규화 (= 노드 자신의 ASR)
             suc_ids = active_ids[s_mask]
             counts = self._success_count_arr[suc_ids].astype(np.float64)
-            norm = counts / mean_n  # 평균 대비 상대 성공 비율
+            own_attempts = np.maximum(1.0, self._attempt_count_arr[suc_ids].astype(np.float64))
+            norm = counts / own_attempts
             if rtype == "fairness":
                 rewards[s_mask] = 1.0 / (1.0 + norm)
             elif rtype == "log_thr":
@@ -1051,14 +1274,23 @@ class DecentralizedQLearningController(_QLearningControllerBase):
         rewards[f_mask] = float(r_cfg['fail']) - retry_pen[f_mask]
         rewards[no_pkt_mask] = float(r_cfg['idle_no_pkt'])
 
-        # 누적 성공 카운터 업데이트 (보상 계산 이후)
+        # 누적 카운터 업데이트 (보상 계산 이후)
+        tx_mask = s_mask | f_mask
+        self._attempt_count_arr[active_ids[tx_mask]] += 1
         self._success_count_arr[active_ids[s_mask]] += 1
 
+        # 에너지 이력 업데이트 — next_state 인코딩 전에 먼저 수행
+        # (energy_bin 상태 변형: 갱신된 E_k를 next_state에 반영해야 올바른 Bellman 타겟)
+        if getattr(self, '_track_energy', False):
+            self._update_energy_batch(active_ids, int_actions, sf_arr)
+
         g_max_next = int(max(gateway_g_bins)) if gateway_g_bins else 1
+        _E_k_next = self._E_k_arr[active_ids] if hasattr(self, '_E_k_arr') else None
         next_state_idx = self._encode_batch(
             sf_arr[active_ids], last_outcome_arr[active_ids], retry_arr[active_ids], g_max_next, gateway_g_bins,
             sf_delta_arr=self._sf_delta_arr[active_ids] if hasattr(self, '_sf_delta_arr') else None,
             ch_arr=ch_arr[active_ids] if ch_arr is not None else None,
+            E_k_arr=_E_k_next,
         )
 
         current_q = self._q_dense[active_ids, state_idx, int_actions]
@@ -1073,6 +1305,7 @@ class DecentralizedQLearningController(_QLearningControllerBase):
             rtype = REWARD_VARIANTS.get(self.reward_variant, {}).get("type", "standard")
             if rtype in ("fairness", "log_thr", "composite") and (slot + 1) % self._epoch_slots == 0:
                 self._success_count_arr[:] = 0
+                self._attempt_count_arr[:] = 0
             return
         super().end_slot(slot)
 
@@ -1133,6 +1366,25 @@ class DecentralizedQLearningController(_QLearningControllerBase):
                 states = [(sd - 1, ch)
                           for sd in range(3)
                           for ch in range(self._n_channels)]
+            elif v == "s18_sf_delta_eb":
+                states = [(sd - 1, eb)
+                          for sd in range(3)
+                          for eb in range(N_ENERGY_BINS)]
+            elif v == "s17_sf_eb":
+                states = [(sf, eb)
+                          for sf in range(self._S2_N_SF)
+                          for eb in range(N_ENERGY_BINS)]
+            elif v == "s15_sf_gmax_eb":
+                states = [(sf, gm, eb)
+                          for sf in range(self._S2_N_SF)
+                          for gm in range(nb)
+                          for eb in range(N_ENERGY_BINS)]
+            elif v == "s16_sf_fl_gmax_eb":
+                states = [(sf, fl, gm, eb)
+                          for sf in range(self._S2_N_SF)
+                          for fl in range(self._S2_N_FL)
+                          for gm in range(nb)
+                          for eb in range(N_ENERGY_BINS)]
             else:  # s7_sf_gch
                 from itertools import product
                 states = [(sf, *gs)

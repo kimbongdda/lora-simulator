@@ -12,6 +12,9 @@ LoRaWAN 충돌 중심 시뮬레이터. 다수의 노드가 슬롯 ALOHA 방식�
 - **Rayleigh fading** 옵션 (`|h|² ~ Exp(1)` 순시 SNR)
 - **4가지 라디오 프로파일**: short (도시), medium (교외), long (농촌), lorasim (논문 기반)
 - 에폭 단위 시계열, 노드별 분석, G·N 스윕 실험 모드
+- **Optuna 하이퍼파라미터 자동 탐색**: TPE 샘플러, 멀티 컨트롤러 병렬 스터디
+- **파라메트릭 보상 탐색**: 보상 계수를 연속값으로 최적화 (`r_success_base`, `r_fail_abs` 등)
+- **프리셋 카트 시스템**: Optuna 최적 결과를 JSON으로 저장, Node Analysis에서 다중 프리셋 동시 비교
 - 실험 결과 자동 CSV 로그 저장
 
 ---
@@ -28,6 +31,20 @@ LoRaWAN 충돌 중심 시뮬레이터. 다수의 노드가 슬롯 ALOHA 방식�
 | Dual-MAB | MAB | Resource-MAB + ACB Backoff-MAB 이중 구조 |
 | Q-learning (decentralized) | RL | 노드별 독립 Q-테이블, 다양한 상태·보상 변형 지원 |
 | Q-learning (절대 SF) | RL | 절대 SF 액션 변형, 채널별 혼잡도 상태 |
+| **ER-Q (ETD/EM)** | **RL + 에너지 규제** | Q-값에 누적 에너지 패널티를 적용해 과도한 전송을 억제. ETD(누적+즉시) 및 EM(가중 혼합) 두 가지 추정 방식 지원 |
+
+---
+
+## 보상 변형 (Q-learning)
+
+| 변형 키 | 타입 | 설계 목표 |
+|---------|------|---------|
+| `base` | standard | 기준선. 성공=+1, 실패=-1, IDLE(패킷 있음)=-0.02 |
+| `fair` | composite | 공정성 강화. 성공 보상 = 0.3 + 0.7/(1+ν) → [0.3, 1.0] |
+| `explore` | composite | 탐색 허용. 성공 보상 = 0.6 + 0.4/(1+ν), 실패=-0.7 |
+| `congestion` | standard | 혼잡 회피. IDLE 보상=+0.10으로 전송 포기 장려 |
+
+파라메트릭 보상 탐색(Optuna)으로 위 계수를 연속값으로 자동 최적화할 수 있다.
 
 ---
 
@@ -64,14 +81,25 @@ streamlit run app.py
 
 | 모드 | 설명 |
 |------|------|
-| Node Analysis | 노드별 ASR, 처리량, SF 히트맵 |
+| Node Analysis | 노드별 ASR, 처리량, SF 히트맵. 프리셋 카트에서 불러온 Q-learning 설정을 추가 시리즈로 동시 실행 |
 | Epoch Timeseries | 에폭 단위 학습 곡선 (충돌률, 처리량, 백로그) |
 | G / N Sweep | 제공 부하 G 및 노드 수 N 스윕 비교 |
-| Reward Variant Compare | Q-learning 보상 설계 변형 비교 |
+| Reward Variant Compare | Q-learning 보상 설계 변형 비교 (base/fair/explore/congestion) |
 | State Variant Compare | Q-learning 상태 공간 변형 비교 |
 | Action Variant Compare | 상대 SF vs 절대 SF 액션 공간 비교 |
 | Phase Learning | 슬롯 페이즈 자기조직화 비교 |
+| **ER Compare** | **ER-Q ETD/EM vs 기준 Q-learning 에폭 시계열 비교** |
+| **Optuna Tune** | **Optuna TPE로 Q-learning 하이퍼파라미터 자동 탐색. 파라메트릭 보상 탐색 지원** |
 | Experiment Log | 누적 실험 결과 조회 및 CSV 다운로드 |
+
+### Optuna Tune 사용법
+
+1. 사이드바에서 **Optuna Tune** 모드 선택
+2. 탐색할 컨트롤러(decentralized Q-learning 등), 트라이얼 수, 목적 지표 설정
+3. `Search parametric reward` 옵션 활성화 시 보상 계수를 연속값으로 탐색
+4. **Run Optuna Search** 클릭 → 결과 테이블에서 원하는 행의 🛒 체크박스 선택
+5. **Add N to Cart** 버튼으로 프리셋 카트에 저장
+6. Node Analysis 모드로 전환 → 사이드바 **Preset Cart** 패널에서 프리셋 체크 후 실행
 
 ### CLI
 
@@ -98,6 +126,10 @@ python example_usage.py
 | `layout` | `"ring"` | 노드 배치: `"ring"` (고정 거리) / `"random"` (균등 무작위) |
 | `queue_mode` | `"accumulate"` | `"fresh"`: 슬롯마다 패킷 교체 / `"accumulate"`: 큐 누적 |
 | `enable_rayleigh_fading` | `False` | Rayleigh fading 활성화 여부 |
+| `psi` (ψ) | `0.0` | ER-Q 에너지 패널티 계수 (0이면 비활성) |
+| `E0` | `10.0` | ER-Q 에너지 허용 기준값 (초과분에만 패널티 부과) |
+| `W` | `20` | ER-Q 에너지 슬라이딩 윈도우 길이 (슬롯) |
+| `mu` (μ) | `0.5` | ER-EM 모드의 누적/즉시 에너지 가중 혼합 비율 |
 
 ---
 
@@ -129,27 +161,38 @@ python example_usage.py
 
 ```
 lora-simulator/
-├── app.py                  # Streamlit GUI 진입점
-├── example_usage.py        # CLI 예제
+├── app.py                      # Streamlit GUI 진입점 (10가지 실험 모드)
+├── example_usage.py            # CLI 예제
+├── outputs/
+│   └── saved_presets.json      # 프리셋 카트 영구 저장소
 ├── env/
-│   ├── simulator.py        # 슬롯 단위 시뮬레이션 루프
-│   ├── channel.py          # 자원 정의, G 추정
-│   ├── link.py             # 경로손실 모델, SNR 임계값
-│   ├── collision.py        # 충돌 판정
-│   ├── layout.py           # 노드 배치
-│   └── types.py            # 공통 데이터 타입
+│   ├── simulator.py            # 슬롯 단위 시뮬레이션 루프
+│   ├── channel.py              # 자원 정의, G 추정
+│   ├── link.py                 # 경로손실 모델, SNR 임계값
+│   ├── collision.py            # 충돌 판정
+│   ├── layout.py               # 노드 배치
+│   └── types.py                # 공통 데이터 타입
 ├── agents/
-│   └── q_learning.py       # Q-learning 컨트롤러 (상태·보상 변형 포함)
+│   └── q_learning.py           # Q-learning 컨트롤러 (상태·보상 변형, ER-Q, reward_params)
 ├── baselines/
-│   ├── catalog.py          # 베이스라인 등록 및 팩토리
+│   ├── catalog.py              # 베이스라인 등록 및 팩토리 (make_controller)
 │   ├── pure_aloha.py
 │   ├── adr_like.py
 │   ├── retry_aware.py
-│   ├── lora_mab.py         # EXP3 MAB
+│   ├── lora_mab.py             # EXP3 MAB
 │   ├── thompson_mab.py
-│   └── dual_mab.py
-├── experiments/            # 실험 모드별 실행 스크립트 및 플롯
-└── utils/                  # 지표 계산, 실험 로그
+│   ├── dual_mab.py
+│   └── q_learning.py           # make_decentralized_q_learning_controller
+├── experiments/                # 실험 모드별 실행 스크립트 및 플롯
+│   ├── per_node_analysis.py    # 노드별 분석 (다중 프리셋 시리즈 지원)
+│   ├── epoch_timeseries.py     # 에폭 시계열
+│   ├── collision_sweeps.py     # G/N 스윕
+│   ├── reward_variant_compare.py
+│   ├── state_variant_compare.py
+│   ├── er_compare.py           # ER-Q (ETD/EM) vs 기준 Q-learning 비교
+│   ├── optuna_tune.py          # Optuna 하이퍼파라미터 탐색 (OptunaConfig, 파라메트릭 보상)
+│   └── style.py                # 시리즈별 색상/마커
+└── utils/                      # 지표 계산, 실험 로그
 ```
 
 ---

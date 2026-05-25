@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Iterable
 
-from .link import SNR_THRESH, apply_rayleigh_fading, link_success
+from .link import SNR_THRESH, apply_rayleigh_fading, apply_rician_fading, link_success
 from .types import OUTCOME_FAIL_COLLISION, OUTCOME_FAIL_LINK, OUTCOME_SUCCESS, ScheduledTransmission
 
 
@@ -14,6 +14,9 @@ def evaluate_transmissions(
     rng,
     enable_rayleigh_fading: bool = False,
     fade_margin_db: float = 0.0,
+    enable_rician_fading: bool = False,
+    rician_k_factor: float = 4.0,
+    rician_fade_margin_db: float = 5.0,
 ):
     """한 슬롯에 발생한 전송들을 평가한다.
 
@@ -40,7 +43,12 @@ def evaluate_transmissions(
             continue
 
         # 충돌 없는 전송: P_rx >= SNR_THRESH[sf] 이면 성공, 미만이면 링크 실패.
-        snr_db = apply_rayleigh_fading(tx.mean_snr_db, rng, fade_margin_db) if enable_rayleigh_fading else tx.mean_snr_db
+        if enable_rician_fading:
+            snr_db = apply_rician_fading(tx.mean_snr_db, rng, rician_k_factor, rician_fade_margin_db)
+        elif enable_rayleigh_fading:
+            snr_db = apply_rayleigh_fading(tx.mean_snr_db, rng, fade_margin_db)
+        else:
+            snr_db = tx.mean_snr_db
         margin_db = float(snr_db) - float(SNR_THRESH[tx.sf_idx])
         if link_success(margin_db):
             outcomes[tx.node_id] = OUTCOME_SUCCESS

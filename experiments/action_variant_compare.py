@@ -60,12 +60,20 @@ class ActionVariantConfig:
     gw_obs_mode: str = "attempt"
     enable_rayleigh_fading: bool = False
     rayleigh_fade_margin_db: float = 10.0
+    enable_rician_fading: bool = False
+    rician_k_factor: float = 4.0
+    rician_fade_margin_db: float = 5.0
     gw_thresholds: tuple[float, ...] = (0.7, 1.3)
     layout: str = "ring"
     controller_key: str = "decentralized_q_learning"
     reward_variant: str = DEFAULT_REWARD_VARIANT
     state_variant: str = DEFAULT_STATE_VARIANT
     action_series_keys: tuple[str, ...] = tuple(SERIES_DEFS)
+    psi: float = 0.0
+    E0: float = 10.0
+    W: int = 20
+    er_mode: str = "ETD"
+    mu: float = 0.5
     output_dir: str = os.path.join("outputs", "action_variant_compare")
 
 
@@ -111,6 +119,9 @@ def run_action_variant_compare(config: ActionVariantConfig | None = None) -> dic
             gw_obs_mode=config.gw_obs_mode,
             enable_rayleigh_fading=config.enable_rayleigh_fading,
             rayleigh_fade_margin_db=config.rayleigh_fade_margin_db,
+            enable_rician_fading=config.enable_rician_fading,
+            rician_k_factor=config.rician_k_factor,
+            rician_fade_margin_db=config.rician_fade_margin_db,
             gw_thresholds=config.gw_thresholds,
             layout=config.layout,
         )
@@ -119,6 +130,11 @@ def run_action_variant_compare(config: ActionVariantConfig | None = None) -> dic
             reward_variant=config.reward_variant,
             state_variant=sv,
             action_variant=av_key,
+            psi=config.psi,
+            E0=config.E0,
+            W=config.W,
+            er_mode=config.er_mode,
+            mu=config.mu,
         )
         result = run_simulation(scenario, controller)
 

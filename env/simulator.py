@@ -110,6 +110,10 @@ def run_simulation(config: ScenarioConfig, controller) -> dict:
 
     use_batch = getattr(controller, 'SUPPORTS_BATCH', False)
 
+    # 에너지 비용: 컨트롤러가 _energy_cost를 가지면 사용, 없으면 기본값 (SF7~SF12)
+    _default_energy_cost: dict[int, float] = {0: 1.0, 1: 2.0, 2: 3.0, 3: 4.0, 4: 5.0, 5: 6.0}
+    _energy_cost: dict[int, float] = getattr(controller, '_energy_cost', None) or _default_energy_cost
+
     # --- 공통 집계 변수 ---
     N = config.n_nodes
     measured_attempts = 0
@@ -126,6 +130,8 @@ def run_simulation(config: ScenarioConfig, controller) -> dict:
     node_link_failures_arr = np.zeros(N, dtype=np.int64)
     node_successes_arr = np.zeros(N, dtype=np.int64)
     node_attempts_arr = np.zeros(N, dtype=np.int64)
+    node_energy_total = np.zeros(N, dtype=np.float64)
+    node_energy_fail = np.zeros(N, dtype=np.float64)
 
     epoch_rows: list[dict] = []
     epoch_generated = 0
@@ -213,10 +219,20 @@ def run_simulation(config: ScenarioConfig, controller) -> dict:
 
                 solo_ids = tx_ids[~col_local]
                 if len(solo_ids) > 0:
-                    if config.enable_rayleigh_fading:
+                    if config.enable_rician_fading:
+                        k = config.rician_k_factor
+                        mean_lin = 10.0 ** ((snr_arr[solo_ids] + config.rician_fade_margin_db) / 10.0)
+                        a = np.sqrt(k / (k + 1.0))
+                        sigma = np.sqrt(1.0 / (2.0 * (k + 1.0)))
+                        h_re = a + np_rng.normal(0.0, sigma, size=len(solo_ids))
+                        h_im = np_rng.normal(0.0, sigma, size=len(solo_ids))
+                        g_arr = np.maximum(h_re ** 2 + h_im ** 2, 1e-10)
+                        inst_snr = 10.0 * np.log10(mean_lin * g_arr)
+                        margin = inst_snr - SNR_THRESH[sf_arr[solo_ids]]
+                    elif config.enable_rayleigh_fading:
                         mean_lin = 10.0 ** ((snr_arr[solo_ids] + config.rayleigh_fade_margin_db) / 10.0)
-                        g = np_rng.exponential(1.0, size=len(solo_ids))
-                        inst_snr = 10.0 * np.log10(mean_lin * g)
+                        g_arr = np_rng.exponential(1.0, size=len(solo_ids))
+                        inst_snr = 10.0 * np.log10(mean_lin * g_arr)
                         margin = inst_snr - SNR_THRESH[sf_arr[solo_ids]]
                     else:
                         margin = snr_arr[solo_ids] - SNR_THRESH[sf_arr[solo_ids]]
@@ -262,6 +278,12 @@ def run_simulation(config: ScenarioConfig, controller) -> dict:
 
                 epoch_node_attempts[tx_ids] += 1
                 epoch_node_successes[suc_ids] += 1
+
+                # 에너지 추적
+                _e_per_tx = np.array([_energy_cost.get(int(sf_arr[tid]), 0.0) for tid in tx_ids], dtype=np.float64)
+                node_energy_total[tx_ids] += _e_per_tx
+                _fail_mask_e = tx_outs != OUTCOME_SUCCESS
+                node_energy_fail[tx_ids[_fail_mask_e]] += _e_per_tx[_fail_mask_e]
 
             if is_meas and len(active_ids) > 0:
                 idle_ids = active_ids[~tx_local_mask]
@@ -386,7 +408,9 @@ def run_simulation(config: ScenarioConfig, controller) -> dict:
                 actions.append(action)
 
             outcomes, slot_collisions, slot_link_failures = evaluate_transmissions(
-                transmissions, rng, config.enable_rayleigh_fading, config.rayleigh_fade_margin_db
+                transmissions, rng,
+                config.enable_rayleigh_fading, config.rayleigh_fade_margin_db,
+                config.enable_rician_fading, config.rician_k_factor, config.rician_fade_margin_db,
             )
 
             # 게이트웨이 G 추정
@@ -418,6 +442,10 @@ def run_simulation(config: ScenarioConfig, controller) -> dict:
                     epoch_attempts += 1
                     epoch_node_attempts[node.node_id] += 1
                     node.attempts_measured += 1
+                    _e = _energy_cost.get(node.sf_idx, 0.0)
+                    node_energy_total[node.node_id] += _e
+                    if outcome != OUTCOME_SUCCESS:
+                        node_energy_fail[node.node_id] += _e
 
                 if outcome == OUTCOME_SUCCESS:
                     if node.queue_len > 0:
@@ -477,6 +505,11 @@ def run_simulation(config: ScenarioConfig, controller) -> dict:
         final_backlog_total = int(sum(node.queue_len for node in nodes))
 
     # ==================== 공통 반환 dict ====================
+    # attempt_vector는 배치/표준 경로 공통으로 사용하는 변수
+    _total_energy = float(node_energy_total.sum())
+    _fail_energy = float(node_energy_fail.sum())
+    _active_nodes = int((attempt_vector > 0).sum())
+
     sf_totals = sf_usage.sum(axis=0)
     sf_total_count = int(sf_totals.sum())
     n_resources = config.n_resources
@@ -528,7 +561,17 @@ def run_simulation(config: ScenarioConfig, controller) -> dict:
         "max_backlog_total": measured_backlog_max,
         "final_backlog_total": final_backlog_total,
         "final_backlog_per_node": final_backlog_total / N if N > 0 else 0.0,
-        "fairness": jains_fairness(success_vector),
+        "fairness": jains_fairness(success_vector[attempt_vector > 0]) if (attempt_vector > 0).any() else 0.0,
+        "fairness_asr": (
+            jains_fairness(
+                success_vector[attempt_vector > 0] / attempt_vector[attempt_vector > 0]
+            ) if (attempt_vector > 0).any() else 0.0
+        ),
+        # Jain FI on per-node throughput (S_i / T_meas) — 전체 N 노드 포함, 0-attempt 노드도 0으로 반영
+        "fairness_thr": (
+            jains_fairness(success_vector / config.measured_slots)
+            if config.measured_slots else 0.0
+        ),
         "sf_usage": sf_usage,
         "idle_usage": node_idle_arr,
         "sf_fractions": (
@@ -538,6 +581,13 @@ def run_simulation(config: ScenarioConfig, controller) -> dict:
         "per_node_attempts": attempt_vector.tolist(),
         "per_node_collisions": node_collisions_arr.tolist(),
         "per_node_link_failures": node_link_failures_arr.tolist(),
+        "per_node_energy_total": node_energy_total.tolist(),
+        "per_node_energy_fail": node_energy_fail.tolist(),
+        "total_energy": _total_energy,
+        "fail_energy": _fail_energy,
+        "mae": _total_energy / _active_nodes if _active_nodes > 0 else 0.0,
+        "elr": _fail_energy / _total_energy if _total_energy > 0 else 0.0,
+        "energy_efficiency": measured_successes / _total_energy if _total_energy > 0 else 0.0,
         "epoch_log": epoch_rows,
         "xs": xs.tolist(),
         "ys": ys.tolist(),

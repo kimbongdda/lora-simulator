@@ -51,6 +51,23 @@ def apply_rayleigh_fading(mean_snr_db: float, rng, fade_margin_db: float = 0.0) 
     return 10.0 * math.log10(mean_linear * g)
 
 
+def apply_rician_fading(mean_snr_db: float, rng, k_factor: float = 4.0, fade_margin_db: float = 0.0) -> float:
+    """Rician fading 적용 후 순시 SNR(dB)를 반환한다.
+
+    K-factor가 클수록 LOS 성분이 강하다 (K=0 → Rayleigh, K→∞ → AWGN).
+    채널 모델: h = (a + X) + jY,  X,Y ~ N(0, σ²),
+    a = sqrt(K/(K+1)),  σ = sqrt(1/(2(K+1)))  → E[|h|²] = 1.
+    rng는 Python standard random.Random 인스턴스.
+    """
+    mean_linear = 10.0 ** ((mean_snr_db + fade_margin_db) / 10.0)
+    a = math.sqrt(k_factor / (k_factor + 1.0))
+    sigma = math.sqrt(1.0 / (2.0 * (k_factor + 1.0)))
+    h_re = a + rng.gauss(0.0, sigma)
+    h_im = rng.gauss(0.0, sigma)
+    g = max(h_re * h_re + h_im * h_im, 1e-10)
+    return 10.0 * math.log10(mean_linear * g)
+
+
 def link_success(margin_db: float) -> bool:
     """SNR 여유분이 0 이상이면 패킷 성공, 미만이면 실패 (하드 임계값 모델).
 

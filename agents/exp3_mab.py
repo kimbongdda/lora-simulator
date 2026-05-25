@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import math
 
-from env.types import ControllerAction, OUTCOME_SUCCESS
+from env.types import ControllerAction, OUTCOME_SUCCESS, OUTCOME_IDLE
 
 N_SF = 6
 
@@ -95,7 +95,7 @@ class Exp3MabController:
         if action.internal_action is None:
             return
 
-        reward = 1.0 if outcome == OUTCOME_SUCCESS else self.fail_reward
+        reward = 1.0 if outcome == OUTCOME_SUCCESS else (0.0 if outcome == OUTCOME_IDLE else self.fail_reward)
         arm = self._last_arm.get(node.node_id)
         prob = self._last_prob.get(node.node_id, 1.0)
         if arm is None:

@@ -29,7 +29,15 @@ class ComparisonConfig:
     queue_mode: str = "accumulate"
     gw_obs_mode: str = "attempt"
     enable_rayleigh_fading: bool = False
+    enable_rician_fading: bool = False
+    rician_k_factor: float = 4.0
+    rician_fade_margin_db: float = 5.0
     dual_mab_b: float = 0.3
+    psi: float = 0.0
+    E0: float = 10.0
+    W: int = 20
+    er_mode: str = "ETD"
+    mu: float = 0.5
     rayleigh_fade_margin_db: float = 10.0
     reward_variant: str = "v0_current"
     reward_variants: tuple[str, ...] = ()
@@ -93,9 +101,12 @@ def _run_one(job):
         gw_obs_mode=config.gw_obs_mode,
         enable_rayleigh_fading=config.enable_rayleigh_fading,
         rayleigh_fade_margin_db=config.rayleigh_fade_margin_db,
+        enable_rician_fading=config.enable_rician_fading,
+        rician_k_factor=config.rician_k_factor,
+        rician_fade_margin_db=config.rician_fade_margin_db,
         layout=config.layout,
     )
-    controller = make_controller(run_spec.base_key, reward_variant, config.state_variant, dual_mab_b=config.dual_mab_b)
+    controller = make_controller(run_spec.base_key, reward_variant, config.state_variant, dual_mab_b=config.dual_mab_b, psi=config.psi, E0=config.E0, W=config.W, er_mode=config.er_mode, mu=config.mu)
     result = run_simulation(scenario, controller)
 
     row = {

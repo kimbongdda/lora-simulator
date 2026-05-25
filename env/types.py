@@ -34,6 +34,9 @@ class ScenarioConfig:
     gw_thresholds: tuple[float, ...] = (0.7, 1.3)  # GW 혼잡도 양자화 bin 경계값. len+1 = bin 수.
     enable_rayleigh_fading: bool = False            # True면 순시 Rayleigh fading SNR 적용.
     rayleigh_fade_margin_db: float = 10.0          # 페이딩 마진(dB). 평균 SNR에 더한 뒤 페이딩 적용.
+    enable_rician_fading: bool = False             # True면 Rician fading 적용. Rayleigh보다 우선.
+    rician_k_factor: float = 4.0                  # Rician K-factor (LOS/산란 전력 비). K≈4: 교외, K≈10: 개활지.
+    rician_fade_margin_db: float = 5.0            # Rician용 페이딩 마진(dB). Rayleigh보다 작아도 됨.
 
     @property
     def n_resources(self) -> int:
