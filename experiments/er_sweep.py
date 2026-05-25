@@ -105,7 +105,6 @@ class ERSweepConfig:
     # 커스텀 보상 함수 (use_custom_reward=True이면 reward_variant 무시)
     use_custom_reward: bool = False
     r_success_base: float = 1.0
-    r_success_fair: float = 0.0
     r_fail_abs: float = 1.0    # 절댓값; 내부에서 음수로 적용
     r_idle_pkt: float = 0.0
     output_dir: str = os.path.join("outputs", "er_sweep")
@@ -159,7 +158,6 @@ def _run_point(
             _reward_params = {
                 "type": "composite",
                 "success_base": config.r_success_base,
-                "success_fair": config.r_success_fair,
                 "fail": -abs(config.r_fail_abs),
                 "idle_pkt": config.r_idle_pkt,
                 "idle_no_pkt": 0.0,

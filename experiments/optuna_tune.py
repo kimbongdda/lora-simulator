@@ -154,8 +154,6 @@ class OptunaConfig:
     search_parametric_reward: bool = False
     r_success_base_low: float = 0.1
     r_success_base_high: float = 1.5
-    r_success_fair_low: float = 0.0
-    r_success_fair_high: float = 1.5
     r_fail_abs_low: float = 0.1
     r_fail_abs_high: float = 2.0
     r_idle_pkt_low: float = -0.1
@@ -172,7 +170,6 @@ class OptunaConfig:
     # fix_reward=True 일 때 수치를 직접 고정하는 경우 (fix_reward_numeric=True)
     fix_reward_numeric: bool = False
     fixed_r_success_base: float = 1.0
-    fixed_r_success_fair: float = 0.0
     fixed_r_fail_abs: float = 1.0
     fixed_r_idle_pkt: float = 0.0
     output_dir: str = os.path.join("outputs", "optuna_tune")
@@ -290,7 +287,6 @@ def _make_objective(config: OptunaConfig, controller_key: str):
                 trial_reward_params = {
                     "type": "composite",
                     "success_base": config.fixed_r_success_base,
-                    "success_fair": config.fixed_r_success_fair,
                     "fail": -abs(config.fixed_r_fail_abs),
                     "idle_pkt": config.fixed_r_idle_pkt,
                     "idle_no_pkt": 0.0,
@@ -301,13 +297,11 @@ def _make_objective(config: OptunaConfig, controller_key: str):
                 reward_variant = config.fixed_reward_variant
             elif config.search_parametric_reward:
                 r_success_base = trial.suggest_float("r_success_base", config.r_success_base_low, config.r_success_base_high)
-                r_success_fair = trial.suggest_float("r_success_fair", config.r_success_fair_low, config.r_success_fair_high)
                 r_fail_abs     = trial.suggest_float("r_fail_abs",     config.r_fail_abs_low,     config.r_fail_abs_high)
                 r_idle_pkt     = trial.suggest_float("r_idle_pkt",     config.r_idle_pkt_low,     config.r_idle_pkt_high)
                 trial_reward_params = {
                     "type": "composite",
                     "success_base": r_success_base,
-                    "success_fair": r_success_fair,
                     "fail": -abs(r_fail_abs),
                     "idle_pkt": r_idle_pkt,
                     "idle_no_pkt": 0.0,
@@ -506,7 +500,7 @@ def _plot_study(study, trial_rows: list[dict], out_dir: str, config: OptunaConfi
     # 2) 연속 파라미터 scatter
     numeric_params = ["alpha", "gamma_q", "eps_min", "eps_decay", "psi", "E0", "W", "mu",
                       "kab_J", "kab_D_max",
-                      "r_success_base", "r_success_fair", "r_fail_abs", "r_idle_pkt"]
+                      "r_success_base", "r_fail_abs", "r_idle_pkt"]
     available = [p for p in numeric_params if any(p in r for r in trial_rows)]
     if available:
         ncols = min(len(available), 4)

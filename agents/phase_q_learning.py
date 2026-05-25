@@ -149,7 +149,7 @@ class PhaseQLearningController:
         np.maximum(self.eps_min, self._epsilon_arr * self.eps_decay, out=self._epsilon_arr)
         r_cfg = REWARD_VARIANTS.get(self.reward_variant, {})
         rtype = r_cfg.get("type", "standard")
-        if rtype in ("fairness", "log_thr", "composite") and (slot + 1) % self._epoch_slots == 0:
+        if rtype in ("fairness", "log_thr") and (slot + 1) % self._epoch_slots == 0:
             self._success_count_arr[:] = 0
 
     def end_run(self) -> None:
@@ -173,18 +173,16 @@ class PhaseQLearningController:
         r_cfg = REWARD_VARIANTS.get(self.reward_variant, REWARD_VARIANTS[DEFAULT_REWARD_VARIANT])
         rtype = r_cfg.get("type", "standard")
         if outcome == OUTCOME_SUCCESS:
-            if rtype in ("fairness", "log_thr", "composite"):
+            if rtype in ("fairness", "log_thr"):
                 mean_n = max(1.0, mean_cnt)
                 norm = node_cnt / mean_n
                 if rtype == "fairness":
                     return 1.0 / (1.0 + norm)
-                elif rtype == "log_thr":
+                else:
                     import math
                     return math.log(norm + 2.0) - math.log(norm + 1.0)
-                else:
-                    base = float(r_cfg.get("success_base", 0.5))
-                    fair = float(r_cfg.get("success_fair", 0.5))
-                    return base + fair / (1.0 + norm)
+            if rtype == "composite":
+                return float(r_cfg.get("success_base", 1.0))
             return float(r_cfg["success"])
         if outcome in (OUTCOME_FAIL_COLLISION, OUTCOME_FAIL_LINK):
             return float(r_cfg["fail"])
@@ -366,18 +364,16 @@ class PhaseQLearningController:
                 (active_outcomes == OUTCOME_FAIL_LINK)
             )
 
-            if rtype in ("fairness", "log_thr", "composite"):
+            if rtype in ("fairness", "log_thr"):
                 mean_n = max(1.0, float(self._success_count_arr.mean()))
                 counts = self._success_count_arr[active_ids[s_mask]].astype(np.float64)
                 norm = counts / mean_n
                 if rtype == "fairness":
                     rewards[s_mask] = 1.0 / (1.0 + norm)
-                elif rtype == "log_thr":
-                    rewards[s_mask] = np.log(norm + 2.0) - np.log(norm + 1.0)
                 else:
-                    base = float(r_cfg.get("success_base", 0.5))
-                    fair = float(r_cfg.get("success_fair", 0.5))
-                    rewards[s_mask] = base + fair / (1.0 + norm)
+                    rewards[s_mask] = np.log(norm + 2.0) - np.log(norm + 1.0)
+            elif rtype == "composite":
+                rewards[s_mask] = float(r_cfg.get("success_base", 1.0))
             else:
                 rewards[s_mask] = float(r_cfg["success"])
 

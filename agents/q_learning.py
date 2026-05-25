@@ -543,34 +543,15 @@ REWARD_VARIANTS: dict[str, dict] = {
         "retry_coef": 0.0,
         "switch_pen": 0.0,
     },
-    "fair": {
-        "label": "Fair",
-        "plot_label": "Fair",
-        "description": (
-            "공정성 강화. 성공 보상 = 0.3 + 0.7/(1+norm) → [0.3, 1.0]. "
-            "이미 성공이 많은 노드일수록 보상을 줄여 노드 간 균등화. "
-            "fail=-1.0으로 ASR 보호 유지."
-        ),
-        "type": "composite",
-        "success_base": 0.3,
-        "success_fair": 0.7,
-        "fail": -1.0,
-        "idle_pkt": -0.02,
-        "idle_no_pkt": 0.0,
-        "retry_coef": 0.0,
-        "switch_pen": 0.0,
-    },
     "explore": {
         "label": "Explore",
         "plot_label": "Explore",
         "description": (
-            "탐색 허용. 성공 보상 = 0.6 + 0.4/(1+norm) → [0.6, 1.0]. "
-            "fail=-0.7로 충돌 페널티를 완화해 다양한 SF·채널 탐색 유도. "
-            "공정성 항 포함."
+            "탐색 허용. 성공 보상 = 0.6. "
+            "fail=-0.7로 충돌 페널티를 완화해 다양한 SF·채널 탐색 유도."
         ),
-        "type": "composite",
-        "success_base": 0.6,
-        "success_fair": 0.4,
+        "type": "standard",
+        "success": 0.6,
         "fail": -0.7,
         "idle_pkt": -0.02,
         "idle_no_pkt": 0.0,
@@ -621,12 +602,7 @@ def compute_reward(
 
     if outcome == OUTCOME_SUCCESS:
         if rtype == "composite":
-            # 전체 노드 평균 대비 정규화: 보상이 시뮬레이션 길이와 무관하게 안정 유지
-            mean_n = max(1.0, float(mean_success_count))
-            norm = float(node_success_count) / mean_n
-            base = float(reward_cfg.get("success_base", 0.5))
-            fair = float(reward_cfg.get("success_fair", 0.5))
-            r = base + fair / (1.0 + norm)
+            r = float(reward_cfg.get("success_base", 1.0))
         else:
             r = float(reward_cfg["success"])
         return r - switch_penalty
@@ -1253,20 +1229,17 @@ class DecentralizedQLearningController(_QLearningControllerBase):
         no_pkt_mask = (active_outcomes == OUTCOME_IDLE) & (queue_arr[active_ids] == 0)
 
         # 성공 보상 계산 (type에 따라 분기)
-        if rtype in ("fairness", "log_thr", "composite"):
-            # 노드 자신의 에폭 내 전송 시도 횟수로 정규화 (= 노드 자신의 ASR)
+        if rtype in ("fairness", "log_thr"):
             suc_ids = active_ids[s_mask]
             counts = self._success_count_arr[suc_ids].astype(np.float64)
             own_attempts = np.maximum(1.0, self._attempt_count_arr[suc_ids].astype(np.float64))
             norm = counts / own_attempts
             if rtype == "fairness":
                 rewards[s_mask] = 1.0 / (1.0 + norm)
-            elif rtype == "log_thr":
+            else:
                 rewards[s_mask] = np.log(norm + 2.0) - np.log(norm + 1.0)
-            else:  # composite: base + fair/(1+norm)
-                base = float(r_cfg.get("success_base", 0.5))
-                fair = float(r_cfg.get("success_fair", 0.5))
-                rewards[s_mask] = base + fair / (1.0 + norm)
+        elif rtype == "composite":
+            rewards[s_mask] = float(r_cfg.get("success_base", 1.0))
         else:
             rewards[s_mask] = float(r_cfg['success'])
 

@@ -201,8 +201,7 @@ def _build_reward_params_from_best(bp: dict) -> "dict | None":
         return None
     return {
         "type": "composite",
-        "success_base": float(bp.get("r_success_base", 0.5)),
-        "success_fair": float(bp.get("r_success_fair", 0.5)),
+        "success_base": float(bp.get("r_success_base", 1.0)),
         "fail": -abs(float(bp.get("r_fail_abs", 1.0))),
         "idle_pkt": float(bp.get("r_idle_pkt", 0.0)),
         "idle_no_pkt": 0.0,
@@ -497,7 +496,6 @@ with st.sidebar:
                             st.markdown(
                                 f"**보상** (parametric)  \n"
                                 f"base `{_rp.get('success_base', 0):.3f}` · "
-                                f"fair `{_rp.get('success_fair', 0):.3f}`  \n"
                                 f"fail `{_rp.get('fail', 0):.3f}` · "
                                 f"idle `{_rp.get('idle_pkt', 0):.4f}`"
                             )
@@ -1084,14 +1082,6 @@ with st.sidebar:
                     format="%.4f", key="s_rp_success_base",
                     help="전송 성공 시 기본 보상값.",
                 )
-                _rp_sf = st.number_input(
-                    "성공 공정성 보상 (success_fair)", min_value=0.0, max_value=5.0,
-                    value=float(_rp_def.get("success_fair", 0.0)),
-                    format="%.4f", key="s_rp_success_fair",
-                    help="성공 시 공정성 항 계수. r_success = base + fair/(1+ν_i).",
-                )
-                if _rp_sf > 0:
-                    st.warning("⚠ success_fair는 전체 노드 평균 성공 횟수(글로벌 정보)를 사용합니다. 순수 분산 설정에서는 0으로 두는 것이 논문상 안전합니다.", icon="⚠️")
                 _rp_fa = st.number_input(
                     "실패 패널티 |fail| (절댓값 입력)", min_value=0.0, max_value=5.0,
                     value=abs(float(_rp_def.get("fail", 1.0))),
@@ -1107,7 +1097,6 @@ with st.sidebar:
                 _loaded_rp = {
                     "type": "composite",
                     "success_base": _rp_sb,
-                    "success_fair": _rp_sf,
                     "fail": -abs(_rp_fa),
                     "idle_pkt": _rp_ip,
                     "idle_no_pkt": 0.0,
@@ -1115,8 +1104,7 @@ with st.sidebar:
                     "switch_pen": 0.0,
                 }
                 st.caption(
-                    f"base `{_rp_sb:.4f}` · fair `{_rp_sf:.4f}` · "
-                    f"fail `{-abs(_rp_fa):.4f}` · idle `{_rp_ip:.4f}`"
+                    f"base `{_rp_sb:.4f}` · fail `{-abs(_rp_fa):.4f}` · idle `{_rp_ip:.4f}`"
                 )
             else:
                 _loaded_rp = st.session_state.get("_loaded_preset_rp")
@@ -1198,7 +1186,7 @@ with st.sidebar:
         optuna_search_parametric_reward = st.toggle(
             "Parametric reward search",
             value=False,
-            help="보상 계수(success_base, success_fair, fail, idle_pkt)를 연속값으로 직접 탐색합니다. 활성화 시 reward_variant 선택이 무시됩니다.",
+            help="보상 계수(success_base, fail, idle_pkt)를 연속값으로 직접 탐색합니다. 활성화 시 reward_variant 선택이 무시됩니다.",
             key="s_optuna_search_parametric_reward",
         )
         if optuna_search_parametric_reward:
@@ -1206,17 +1194,14 @@ with st.sidebar:
                 _col_r1, _col_r2 = st.columns(2)
                 with _col_r1:
                     optuna_r_success_base_low  = st.number_input("success_base min", value=0.1,  min_value=0.0,  max_value=2.0, format="%.3f", key="s_r_success_base_low")
-                    optuna_r_success_fair_low  = st.number_input("success_fair min", value=0.0,  min_value=0.0,  max_value=2.0, format="%.3f", key="s_r_success_fair_low")
                     optuna_r_fail_abs_low      = st.number_input("fail abs min",     value=0.1,  min_value=0.0,  max_value=2.0, format="%.3f", key="s_r_fail_abs_low")
                     optuna_r_idle_pkt_low      = st.number_input("idle_pkt min",     value=-0.1, min_value=-0.5, max_value=0.5, format="%.3f", key="s_r_idle_pkt_low")
                 with _col_r2:
                     optuna_r_success_base_high = st.number_input("success_base max", value=1.5,  min_value=0.1,  max_value=5.0, format="%.3f", key="s_r_success_base_high")
-                    optuna_r_success_fair_high = st.number_input("success_fair max", value=1.5,  min_value=0.0,  max_value=5.0, format="%.3f", key="s_r_success_fair_high")
                     optuna_r_fail_abs_high     = st.number_input("fail abs max",     value=2.0,  min_value=0.1,  max_value=5.0, format="%.3f", key="s_r_fail_abs_high")
                     optuna_r_idle_pkt_high     = st.number_input("idle_pkt max",     value=0.3,  min_value=-0.5, max_value=1.0, format="%.3f", key="s_r_idle_pkt_high")
         else:
             optuna_r_success_base_low, optuna_r_success_base_high = 0.1, 1.5
-            optuna_r_success_fair_low, optuna_r_success_fair_high = 0.0, 1.5
             optuna_r_fail_abs_low,     optuna_r_fail_abs_high     = 0.1, 2.0
             optuna_r_idle_pkt_low,     optuna_r_idle_pkt_high     = -0.1, 0.3
         with st.expander("Q-learning search ranges", expanded=False):
@@ -1277,13 +1262,11 @@ with st.sidebar:
                         optuna_fixed_r_success_base = st.number_input("success_base", value=1.0, min_value=0.0, max_value=5.0, format="%.4f", key="s_optuna_fixed_r_sb")
                         optuna_fixed_r_fail_abs     = st.number_input("|fail| (절댓값)", value=1.0, min_value=0.0, max_value=5.0, format="%.4f", key="s_optuna_fixed_r_fa")
                     with _col_rw2:
-                        optuna_fixed_r_success_fair = st.number_input("success_fair", value=0.0, min_value=0.0, max_value=5.0, format="%.4f", key="s_optuna_fixed_r_sf")
                         optuna_fixed_r_idle_pkt     = st.number_input("idle_pkt", value=0.0, min_value=-2.0, max_value=2.0, format="%.4f", key="s_optuna_fixed_r_ip")
-                    st.caption(f"base={optuna_fixed_r_success_base}  fair={optuna_fixed_r_success_fair}  fail={-abs(optuna_fixed_r_fail_abs):.4f}  idle={optuna_fixed_r_idle_pkt}")
+                    st.caption(f"base={optuna_fixed_r_success_base}  fail={-abs(optuna_fixed_r_fail_abs):.4f}  idle={optuna_fixed_r_idle_pkt}")
                     optuna_fixed_reward_variant = "base"
                 else:
                     optuna_fixed_r_success_base = 1.0
-                    optuna_fixed_r_success_fair = 0.0
                     optuna_fixed_r_fail_abs = 1.0
                     optuna_fixed_r_idle_pkt = 0.0
                     optuna_fixed_reward_variant = st.selectbox(
@@ -1296,7 +1279,6 @@ with st.sidebar:
                 optuna_fix_reward_numeric = False
                 optuna_fixed_reward_variant = "base"
                 optuna_fixed_r_success_base = 1.0
-                optuna_fixed_r_success_fair = 0.0
                 optuna_fixed_r_fail_abs = 1.0
                 optuna_fixed_r_idle_pkt = 0.0
 
@@ -1438,11 +1420,9 @@ with st.sidebar:
         optuna_fix_reward_numeric = False
         optuna_fixed_reward_variant = "base"
         optuna_fixed_r_success_base = 1.0
-        optuna_fixed_r_success_fair = 0.0
         optuna_fixed_r_fail_abs = 1.0
         optuna_fixed_r_idle_pkt = 0.0
         optuna_r_success_base_low, optuna_r_success_base_high = 0.1, 1.5
-        optuna_r_success_fair_low, optuna_r_success_fair_high = 0.0, 1.5
         optuna_r_fail_abs_low,     optuna_r_fail_abs_high     = 0.1, 2.0
         optuna_r_idle_pkt_low,     optuna_r_idle_pkt_high     = -0.1, 0.3
         optuna_kab_J_low, optuna_kab_J_high = 1, 10
@@ -1487,12 +1467,6 @@ with st.sidebar:
                     "성공 기본 보상 (success_base)", min_value=0.0, max_value=5.0,
                     value=1.0, format="%.4f", key="sw_rp_success_base",
                 )
-                _sw_rp_sf = st.number_input(
-                    "성공 공정성 보상 (success_fair)", min_value=0.0, max_value=5.0,
-                    value=0.0, format="%.4f", key="sw_rp_success_fair",
-                )
-                if _sw_rp_sf > 0:
-                    st.warning("success_fair는 글로벌 정보를 사용합니다. 순수 분산 설정에서는 0 권장.", icon="⚠️")
                 _sw_rp_fa = st.number_input(
                     "실패 패널티 |fail| (절댓값 입력)", min_value=0.0, max_value=5.0,
                     value=1.0, format="%.4f", key="sw_rp_fail_abs",
@@ -1502,11 +1476,10 @@ with st.sidebar:
                     value=0.0, format="%.4f", key="sw_rp_idle_pkt",
                 )
                 st.caption(
-                    f"base `{_sw_rp_sb:.3f}` · fair `{_sw_rp_sf:.3f}` · "
-                    f"fail `-{_sw_rp_fa:.3f}` · idle `{_sw_rp_ip:.4f}`"
+                    f"base `{_sw_rp_sb:.3f}` · fail `-{_sw_rp_fa:.3f}` · idle `{_sw_rp_ip:.4f}`"
                 )
             else:
-                _sw_rp_sb = 1.0; _sw_rp_sf = 0.0; _sw_rp_fa = 1.0; _sw_rp_ip = 0.0
+                _sw_rp_sb = 1.0; _sw_rp_fa = 1.0; _sw_rp_ip = 0.0
 
         st.divider()
         _sw_mode = st.radio(
@@ -1766,8 +1739,6 @@ if run_clicked:
                 search_parametric_reward=bool(optuna_search_parametric_reward),
                 r_success_base_low=float(optuna_r_success_base_low),
                 r_success_base_high=float(optuna_r_success_base_high),
-                r_success_fair_low=float(optuna_r_success_fair_low),
-                r_success_fair_high=float(optuna_r_success_fair_high),
                 r_fail_abs_low=float(optuna_r_fail_abs_low),
                 r_fail_abs_high=float(optuna_r_fail_abs_high),
                 r_idle_pkt_low=float(optuna_r_idle_pkt_low),
@@ -1782,7 +1753,6 @@ if run_clicked:
                 fix_reward_numeric=bool(optuna_fix_reward_numeric),
                 fixed_reward_variant=str(optuna_fixed_reward_variant),
                 fixed_r_success_base=float(optuna_fixed_r_success_base),
-                fixed_r_success_fair=float(optuna_fixed_r_success_fair),
                 fixed_r_fail_abs=float(optuna_fixed_r_fail_abs),
                 fixed_r_idle_pkt=float(optuna_fixed_r_idle_pkt),
                 output_dir=output_dir,
@@ -1835,7 +1805,7 @@ if run_clicked:
                             "mean_backlog_per_node", "final_backlog_per_node"}
             _hparam_keys = ["reward_variant", "alpha", "gamma_q", "eps_min", "eps_decay",
                             "psi", "E0", "W", "mu",
-                            "r_success_base", "r_success_fair", "r_fail_abs", "r_idle_pkt"]
+                            "r_success_base", "r_fail_abs", "r_idle_pkt"]
             _detail_keys = [("success_rate", "ASR"), ("fairness", "Fair(S)"),
                             ("fairness_thr", "Fair(Thr)"),
                             ("throughput", "Throughput"), ("collision_rate", "Collision")]
@@ -1883,7 +1853,7 @@ if run_clicked:
                            "success_rate", "fairness", "fairness_thr", "throughput", "collision_rate",
                            "reward_variant", "alpha", "gamma_q", "eps_min", "eps_decay",
                            "psi", "E0", "W", "mu",
-                           "r_success_base", "r_success_fair", "r_fail_abs", "r_idle_pkt"]
+                           "r_success_base", "r_fail_abs", "r_idle_pkt"]
             _store_result(
                 mode=mode,
                 image_path=_main_img,
@@ -1955,7 +1925,6 @@ if run_clicked:
                 reward_variant=_sw_reward,
                 use_custom_reward=bool(_sw_use_custom_rp),
                 r_success_base=float(_sw_rp_sb),
-                r_success_fair=float(_sw_rp_sf),
                 r_fail_abs=float(_sw_rp_fa),
                 r_idle_pkt=float(_sw_rp_ip),
                 # sweep mode
@@ -2585,7 +2554,7 @@ if last_result and mode not in (MODE_LOG, MODE_SNAPSHOT):
             _hparam_cols = ["trial", "controller", "reward_variant",
                             "alpha", "gamma_q", "eps_min", "eps_decay",
                             "psi", "E0", "W", "mu",
-                            "r_success_base", "r_success_fair", "r_fail_abs", "r_idle_pkt"]
+                            "r_success_base", "r_fail_abs", "r_idle_pkt"]
             _core_metric_cols = [c for c in ["value", "success_rate", "fairness", "fairness_thr"] if c in df.columns]
             _show_cols = (
                 [c for c in _hparam_cols if c in df.columns]
