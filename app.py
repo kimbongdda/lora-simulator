@@ -1520,15 +1520,6 @@ with st.sidebar:
             help="각 파라미터 포인트를 다른 seed로 N번 실행 후 평균. 많을수록 정확하지만 N배 느림.",
             key="sw_n_repeats",
         )
-        import os as _os_sw
-        _max_sw_workers = max(1, (_os_sw.cpu_count() or 1) - 1)
-        st.slider(
-            "병렬 워커 수 (n_workers)", min_value=1, max_value=_max_sw_workers,
-            value=min(4, _max_sw_workers),
-            help=f"스윕 포인트를 동시에 실행할 프로세스 수. 코어 수: {_os_sw.cpu_count()}",
-            key="s_sweep_n_workers",
-        )
-
         # "both" 모드에서 single 스윕은 공유 파라미터(psi/E0/W)만 허용; mu는 고정값으로 사용
         _sw_param_opts = SWEEP_PARAMS if _sw_er_type == "em" else [p for p in SWEEP_PARAMS if p != "mu"]
 
@@ -1996,7 +1987,6 @@ if run_clicked:
                 fixed_E0=float(_sw_fixed_E0),
                 fixed_W=int(_sw_fixed_W),
                 fixed_mu=float(_sw_fixed_mu),
-                n_workers=int(st.session_state.get("s_sweep_n_workers", 1)),
                 output_dir=output_dir,
             )
 

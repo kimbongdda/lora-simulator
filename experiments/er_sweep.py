@@ -10,13 +10,9 @@
 from __future__ import annotations
 
 import dataclasses
-import multiprocessing
 import os
 import sys
 from typing import Callable
-
-# Windows에서 ProcessPoolExecutor spawn 시 재귀 실행 방지
-multiprocessing.freeze_support()
 
 import matplotlib
 matplotlib.use("Agg")
@@ -112,8 +108,6 @@ class ERSweepConfig:
     r_success_fair: float = 0.0
     r_fail_abs: float = 1.0    # 절댓값; 내부에서 음수로 적용
     r_idle_pkt: float = 0.0
-    # 병렬 실행: 스윕 포인트를 ProcessPoolExecutor로 동시 실행 (1=순차)
-    n_workers: int = 1
     output_dir: str = os.path.join("outputs", "er_sweep")
 
 
@@ -263,63 +257,27 @@ def _build_sweep_args(config: ERSweepConfig, sweep_vals: list, seed_offset: int)
     return args
 
 
-def _worker_init(project_root: str) -> None:
-    """Worker 프로세스 초기화: 프로젝트 루트를 sys.path에 등록."""
-    if project_root not in sys.path:
-        sys.path.insert(0, project_root)
-
-
 def _run_single_sweep(
     config: ERSweepConfig,
     seed_offset: int,
     advance_cb: Callable[[float], None],
 ) -> tuple[list[dict], list]:
-    from concurrent.futures import ProcessPoolExecutor, as_completed
-
     is_int = config.sweep_param == "W"
     sweep_vals = _gen_values(config.sweep_min, config.sweep_max,
                              config.sweep_n_steps, config.sweep_log_scale, is_int)
     point_args = _build_sweep_args(config, sweep_vals, seed_offset)
-    rows: list[dict | None] = [None] * len(sweep_vals)
-    _empty = {k: 0.0 for k in
-              ("success_rate", "throughput", "fairness", "fairness_asr",
-               "fairness_thr", "collision_rate", "mean_backlog_per_node")}
+    rows: list[dict] = []
 
-    if config.n_workers > 1:
-        with ProcessPoolExecutor(
-            max_workers=config.n_workers,
-            initializer=_worker_init,
-            initargs=(_PROJECT_ROOT,),
-        ) as pool:
-            future_to_idx = {
-                pool.submit(_run_point, config, *args): i
-                for i, args in enumerate(point_args)
-            }
-            for fut in as_completed(future_to_idx):
-                i = future_to_idx[fut]
-                try:
-                    metrics = fut.result()
-                except Exception as exc:
-                    print(f"[sweep worker {i} failed] {exc}", file=sys.stderr)
-                    metrics = _empty.copy()
-                val = sweep_vals[i]
-                psi, E0, W, mu, _ = point_args[i]
-                row = {"step": i + 1, "sweep_param": config.sweep_param,
-                       "sweep_value": val, "psi": psi, "E0": E0, "W": W, "mu": mu}
-                row.update(metrics)
-                rows[i] = row
-                advance_cb(metrics["success_rate"])
-    else:
-        for i, (val, args) in enumerate(zip(sweep_vals, point_args)):
-            psi, E0, W, mu, seed_base = args
-            metrics = _run_point(config, psi, E0, W, mu, seed_base)
-            row = {"step": i + 1, "sweep_param": config.sweep_param,
-                   "sweep_value": val, "psi": psi, "E0": E0, "W": W, "mu": mu}
-            row.update(metrics)
-            rows[i] = row
-            advance_cb(metrics["success_rate"])
+    for i, (val, args) in enumerate(zip(sweep_vals, point_args)):
+        psi, E0, W, mu, seed_base = args
+        metrics = _run_point(config, psi, E0, W, mu, seed_base)
+        row = {"step": i + 1, "sweep_param": config.sweep_param,
+               "sweep_value": val, "psi": psi, "E0": E0, "W": W, "mu": mu}
+        row.update(metrics)
+        rows.append(row)
+        advance_cb(metrics["success_rate"])
 
-    return rows, sweep_vals  # type: ignore[return-value]
+    return rows, sweep_vals
 
 
 # ── 플롯 함수 ─────────────────────────────────────────────────────────────
